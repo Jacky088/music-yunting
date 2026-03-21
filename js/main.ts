@@ -42,27 +42,48 @@ let artistAlbumsOffset = 0;
 let artistAlbumsHasMore = false;
 let artistDetailCurrentId = 0;
 
+// NOTE: 副链路请求序号，避免视图切换后的旧请求回写
+let artistListRequestId = 0;
+let artistDetailRequestId = 0;
+let albumDetailRequestId = 0;
+
+// NOTE: “我的”动作区统一状态
+let playlistActionSubmitting = false;
+let playlistActionFeedbackMessage = '';
+let playlistActionFeedbackType: PlaylistActionFeedbackType = 'neutral';
+
 // NOTE: 触摸滑动状态
 let touchStartX = 0;
 let touchStartY = 0;
 let touchEndX = 0;
 let touchEndY = 0;
 
-const PLAYLIST_ACTION_UI: Record<PlaylistActionMode, PlaylistActionUiConfig> = {
+type PlaylistActionFeedbackType = 'neutral' | 'info' | 'success' | 'error';
+
+const PLAYLIST_ACTION_UI: Record<
+    PlaylistActionMode,
+    PlaylistActionUiConfig & { submittingLabel: string; idleMessage: string }
+> = {
     user: {
         placeholder: '输入网易云用户ID...',
         buttonLabel: '加载',
         iconClass: 'fas fa-user',
+        submittingLabel: '加载中',
+        idleMessage: '输入用户 ID 后加载公开歌单',
     },
     radio: {
         placeholder: '输入电台ID...',
         buttonLabel: '添加',
         iconClass: 'fas fa-podcast',
+        submittingLabel: '添加中',
+        idleMessage: '输入电台 ID 可添加到我的列表',
     },
     playlist: {
         placeholder: '输入歌单ID或链接...',
         buttonLabel: '解析',
         iconClass: 'fas fa-cloud-download-alt',
+        submittingLabel: '解析中',
+        idleMessage: '输入歌单链接或 ID 解析歌曲列表',
     },
 };
 
@@ -134,17 +155,10 @@ function applyViewVisibility(showIds: string[], hideIds: string[]): void {
 }
 
 function syncPlaylistActionUi(action: PlaylistActionMode): void {
-    const input = getElement<HTMLInputElement>('#playlistActionInput');
-    const btn = getElement('#playlistActionBtn');
-    if (!input || !btn) return;
-
-    const config = PLAYLIST_ACTION_UI[action];
-    const icon = btn.querySelector('i');
-    const span = btn.querySelector('span');
-
-    input.placeholder = config.placeholder;
-    if (icon) icon.className = config.iconClass;
-    if (span) span.textContent = config.buttonLabel;
+    playlistActionSubmitting = false;
+    playlistActionFeedbackMessage = PLAYLIST_ACTION_UI[action].idleMessage;
+    playlistActionFeedbackType = 'neutral';
+    refreshPlaylistActionUi(action);
 }
 
 function triggerSearchOnEnter(key: string, onSearch: () => void): void {
@@ -204,6 +218,79 @@ function showRadioListView(): void {
 
 function showRadioProgramsView(): void {
     applyViewVisibility(['radioProgramsView'], ['radioListView']);
+}
+
+function getCurrentPlaylistActionMode(): PlaylistActionMode {
+    const select = getElement<HTMLSelectElement>('#playlistActionSelect');
+    return getPlaylistActionMode(select?.value || 'user');
+}
+
+function refreshPlaylistActionUi(action: PlaylistActionMode = getCurrentPlaylistActionMode()): void {
+    const input = getElement<HTMLInputElement>('#playlistActionInput');
+    const config = PLAYLIST_ACTION_UI[action];
+
+    ui.syncPlaylistActionFormState({
+        placeholder: config.placeholder,
+        buttonLabel: playlistActionSubmitting ? config.submittingLabel : config.buttonLabel,
+        iconClass: config.iconClass,
+        isSubmitting: playlistActionSubmitting,
+        isDisabled: playlistActionSubmitting || !input?.value.trim(),
+        feedbackMessage: playlistActionFeedbackMessage || config.idleMessage,
+        feedbackType: playlistActionFeedbackType,
+    });
+}
+
+function setPlaylistActionState(
+    action: PlaylistActionMode,
+    options: { message: string; type?: PlaylistActionFeedbackType; submitting?: boolean }
+): void {
+    playlistActionSubmitting = options.submitting ?? false;
+    playlistActionFeedbackMessage = options.message;
+    playlistActionFeedbackType = options.type ?? 'neutral';
+    refreshPlaylistActionUi(action);
+}
+
+function resetArtistAlbumSongsView(): void {
+    const albumHeader = getElement('#albumSongsHeader');
+    if (albumHeader) {
+        albumHeader.innerHTML = '';
+    }
+    ui.showEmptyState(
+        'albumSongsResults',
+        '选择专辑后查看歌曲列表',
+        'fas fa-compact-disc',
+        '返回后重新进入专辑会刷新内容'
+    );
+}
+
+function resetArtistDetailView(): void {
+    const detailHeader = getElement('#artistDetailHeader');
+    const detailDesc = getElement('#artistDesc');
+    if (detailHeader) {
+        detailHeader.innerHTML = '';
+    }
+    if (detailDesc) {
+        detailDesc.innerHTML = '';
+    }
+    ui.showEmptyState(
+        'artistAlbumGrid',
+        '选择歌手后查看专辑',
+        'fas fa-compact-disc',
+        '歌手详情会在这里更新'
+    );
+}
+
+function resetRadioProgramsView(): void {
+    const radioHeader = getElement('#radioProgramsHeader');
+    if (radioHeader) {
+        radioHeader.innerHTML = '';
+    }
+    ui.showEmptyState(
+        'radioProgramResults',
+        '选择电台后查看节目',
+        'fas fa-podcast',
+        '点击节目即可直接播放'
+    );
 }
 
 /**
@@ -272,6 +359,7 @@ function bindEventListeners(): void {
     const searchInput = getElement<HTMLInputElement>('#searchInput');
     const exploreBtn = getElement('#exploreRadarBtn');
     const playlistActionSelect = getElement<HTMLSelectElement>('#playlistActionSelect');
+    const playlistActionInput = getElement<HTMLInputElement>('#playlistActionInput');
     const playlistActionBtn = getElement('#playlistActionBtn');
 
     if (searchBtn) {
@@ -294,10 +382,24 @@ function bindEventListeners(): void {
     // 下拉选择器切换事件
     if (playlistActionSelect) {
         playlistActionSelect.addEventListener('change', () => {
+            if (playlistActionInput) {
+                playlistActionInput.value = '';
+            }
             syncPlaylistActionUi(getPlaylistActionMode(playlistActionSelect.value));
         });
 
         syncPlaylistActionUi(getPlaylistActionMode(playlistActionSelect.value));
+    }
+
+    if (playlistActionInput) {
+        playlistActionInput.addEventListener('input', () => {
+            if (!playlistActionSubmitting) {
+                const action = getCurrentPlaylistActionMode();
+                playlistActionFeedbackMessage = PLAYLIST_ACTION_UI[action].idleMessage;
+                playlistActionFeedbackType = 'neutral';
+            }
+            refreshPlaylistActionUi();
+        });
     }
 
     // 统一按钮分发
@@ -474,6 +576,9 @@ function bindEventListeners(): void {
     const backToArtists = getElement('#backToArtists');
     if (backToArtists) {
         backToArtists.addEventListener('click', () => {
+            artistDetailRequestId++;
+            albumDetailRequestId++;
+            resetArtistAlbumSongsView();
             showArtistListView();
         });
     }
@@ -482,7 +587,9 @@ function bindEventListeners(): void {
     const backToArtistDetail = getElement('#backToArtistDetail');
     if (backToArtistDetail) {
         backToArtistDetail.addEventListener('click', () => {
-            applyViewVisibility(['artistDetailView'], ['albumSongsView']);
+            albumDetailRequestId++;
+            resetArtistAlbumSongsView();
+            showArtistDetailView();
         });
     }
 
@@ -490,6 +597,7 @@ function bindEventListeners(): void {
     const backToRadios = getElement('#backToRadios');
     if (backToRadios) {
         backToRadios.addEventListener('click', () => {
+            resetRadioProgramsView();
             showRadioListView();
         });
     }
@@ -631,17 +739,27 @@ async function handleExplore(): Promise<void> {
  */
 async function handleParsePlaylist(): Promise<void> {
     const playlistIdInput = getElement<HTMLInputElement>('#playlistActionInput');
+    const action = getCurrentPlaylistActionMode();
 
     if (!playlistIdInput) return;
 
     const playlistId = playlistIdInput.value;
 
     if (!playlistId.trim()) {
+        setPlaylistActionState(action, {
+            message: '请输入歌单 ID 或链接后再解析',
+            type: 'error',
+        });
         ui.showNotification('请输入歌单ID或链接', 'warning');
         return;
     }
 
     ui.showLoading('parseResults');
+    setPlaylistActionState(action, {
+        message: '正在解析歌单内容...',
+        type: 'info',
+        submitting: true,
+    });
 
     try {
         const playlist = await api.parsePlaylistAPI(playlistId);
@@ -649,7 +767,16 @@ async function handleParsePlaylist(): Promise<void> {
 
         // 显示成功解析的歌单信息
         if (playlist.name) {
+            setPlaylistActionState(action, {
+                message: `解析成功：${playlist.name}`,
+                type: 'success',
+            });
             ui.showNotification(`成功解析歌单《${playlist.name}》，共 ${playlist.count || 0} 首歌曲`, 'success');
+        } else {
+            setPlaylistActionState(action, {
+                message: `歌单解析完成，共 ${playlist.songs.length} 首歌曲`,
+                type: 'success',
+            });
         }
     } catch (error) {
         logger.error('Parse playlist failed:', error);
@@ -662,6 +789,10 @@ async function handleParsePlaylist(): Promise<void> {
         } else if (error instanceof Error) {
             errorMessage = error.message;
         }
+        setPlaylistActionState(action, {
+            message: errorMessage,
+            type: 'error',
+        });
         ui.showError(errorMessage, 'parseResults');
         ui.showNotification(errorMessage, 'error');
     }
@@ -709,16 +840,21 @@ function switchMyTab(tabName: MyTabName): void {
  */
 async function handleLoadArtists(area: number, type: number = -1, initial: string | number = -1, append: boolean = false): Promise<void> {
     const artistGrid = getElement('#artistGrid');
+    const requestId = ++artistListRequestId;
 
     if (!append) {
         artistOffset = 0;
         artistCurrentArea = area;
         artistCurrentType = type;
         artistCurrentInitial = initial;
+        artistDetailRequestId++;
+        albumDetailRequestId++;
+        resetArtistDetailView();
+        resetArtistAlbumSongsView();
         if (artistGrid) {
             ui.renderFeedbackState('artistGrid', {
                 state: 'loading',
-                message: '正在加载...',
+                message: '正在加载歌手...',
                 iconClass: 'fas fa-spinner fa-spin',
                 contentStyle: 'grid-column: 1/-1;',
             });
@@ -730,6 +866,7 @@ async function handleLoadArtists(area: number, type: number = -1, initial: strin
 
     try {
         const result = await api.getArtistList(area, type, initial, 60, artistOffset);
+        if (requestId !== artistListRequestId) return;
         artistOffset += result.artists.length;
         artistHasMore = result.more;
         ui.displayArtistGrid(result.artists, 'artistGrid', handleArtistClick, {
@@ -739,6 +876,7 @@ async function handleLoadArtists(area: number, type: number = -1, initial: strin
         });
     } catch (error) {
         logger.error('Load artists failed:', error);
+        if (requestId !== artistListRequestId) return;
         if (artistGrid && !append) {
             ui.showError('加载歌手失败', 'artistGrid');
             const feedback = artistGrid.querySelector('[data-feedback-state="error"]');
@@ -755,9 +893,17 @@ async function handleLoadArtists(area: number, type: number = -1, initial: strin
 async function handleArtistClick(artist: ArtistInfo): Promise<void> {
     const artistDetailHeader = getElement('#artistDetailHeader');
     const artistDesc = getElement('#artistDesc');
+    const requestId = ++artistDetailRequestId;
 
     // 切换视图：隐藏网格，显示歌手详情
     showArtistDetailView();
+    resetArtistAlbumSongsView();
+    ui.renderFeedbackState('artistAlbumGrid', {
+        state: 'loading',
+        message: '正在加载专辑...',
+        iconClass: 'fas fa-spinner fa-spin',
+        contentStyle: 'padding:20px',
+    });
 
     // 渲染歌手头部信息
     if (artistDetailHeader) {
@@ -787,6 +933,7 @@ async function handleArtistClick(artist: ArtistInfo): Promise<void> {
     // 顺序加载简介和专辑（Turnstile token 一次性，不能并行请求）
     const descResult = await api.getArtistDesc(artist.id).catch(() => ({ briefDesc: '', introduction: [] }));
     const albumsResult = await api.getArtistAlbums(artist.id, 30, 0).catch(() => ({ albums: [], more: false }));
+    if (requestId !== artistDetailRequestId) return;
 
     // 渲染简介
     if (artistDesc) {
@@ -829,8 +976,10 @@ async function handleArtistClick(artist: ArtistInfo): Promise<void> {
  * 加载更多歌手专辑
  */
 async function loadMoreArtistAlbums(): Promise<void> {
+    const requestId = ++artistDetailRequestId;
     try {
         const result = await api.getArtistAlbums(artistDetailCurrentId, 30, artistAlbumsOffset);
+        if (requestId !== artistDetailRequestId) return;
         artistAlbumsOffset += result.albums.length;
         artistAlbumsHasMore = result.more;
         ui.displayAlbumGrid(result.albums, 'artistAlbumGrid', handleAlbumClick, {
@@ -849,6 +998,7 @@ async function loadMoreArtistAlbums(): Promise<void> {
  */
 async function handleAlbumClick(album: AlbumInfo): Promise<void> {
     const albumSongsHeader = getElement('#albumSongsHeader');
+    const requestId = ++albumDetailRequestId;
 
     // 切换视图
     showAlbumSongsDetailView();
@@ -868,10 +1018,15 @@ async function handleAlbumClick(album: AlbumInfo): Promise<void> {
         `;
     }
 
-    ui.showLoading('albumSongsResults');
+    ui.renderFeedbackState('albumSongsResults', {
+        state: 'loading',
+        message: '正在加载专辑歌曲...',
+        iconClass: 'fas fa-spinner fa-spin',
+    });
 
     try {
         const result = await api.getAlbumDetail(album.id);
+        if (requestId !== albumDetailRequestId) return;
         ui.displaySearchResults(result.songs, 'albumSongsResults', result.songs);
 
         if (result.songs.length === 0) {
@@ -879,6 +1034,7 @@ async function handleAlbumClick(album: AlbumInfo): Promise<void> {
         }
     } catch (error) {
         logger.error('Load album detail failed:', error);
+        if (requestId !== albumDetailRequestId) return;
         ui.showError('加载专辑歌曲失败', 'albumSongsResults');
     }
 }
@@ -1057,10 +1213,15 @@ function loadPlayHistory(): void {
  */
 async function handleLoadUserPlaylists(): Promise<void> {
     const userIdInput = getElement<HTMLInputElement>('#playlistActionInput');
+    const action = getCurrentPlaylistActionMode();
     if (!userIdInput) return;
 
     const uid = userIdInput.value.trim();
     if (!uid || !/^\d+$/.test(uid)) {
+        setPlaylistActionState(action, {
+            message: '请输入有效的用户 ID（纯数字）',
+            type: 'error',
+        });
         ui.showNotification('请输入有效的用户ID（纯数字）', 'warning');
         return;
     }
@@ -1079,17 +1240,30 @@ async function handleLoadUserPlaylists(): Promise<void> {
             contentStyle: 'padding:20px',
         });
     }
+    setPlaylistActionState(action, {
+        message: '正在加载用户公开歌单...',
+        type: 'info',
+        submitting: true,
+    });
 
     try {
         const playlists = await api.getUserPlaylists(uid);
         const savedRadios = loadSavedRadios();
         renderUserPlaylistList(playlists, savedRadios);
+        setPlaylistActionState(action, {
+            message: `已加载 ${playlists.length} 个歌单`,
+            type: 'success',
+        });
         ui.showNotification(`已加载 ${playlists.length} 个歌单`, 'success');
     } catch (error) {
         logger.error('Load user playlists failed:', error);
         if (listEl) {
             ui.showError('加载歌单失败', 'userPlaylistsList');
         }
+        setPlaylistActionState(action, {
+            message: '加载用户歌单失败，请稍后重试',
+            type: 'error',
+        });
         ui.showNotification('加载用户歌单失败', 'error');
     }
 }
@@ -1099,19 +1273,33 @@ async function handleLoadUserPlaylists(): Promise<void> {
  */
 async function handleAddRadio(): Promise<void> {
     const radioIdInput = getElement<HTMLInputElement>('#playlistActionInput');
+    const action = getCurrentPlaylistActionMode();
     if (!radioIdInput) return;
 
     const rid = radioIdInput.value.trim();
     if (!rid || !/^\d+$/.test(rid)) {
+        setPlaylistActionState(action, {
+            message: '请输入有效的电台 ID（纯数字）',
+            type: 'error',
+        });
         ui.showNotification('请输入有效的电台ID（纯数字）', 'warning');
         return;
     }
 
+    setPlaylistActionState(action, {
+        message: '正在获取电台信息...',
+        type: 'info',
+        submitting: true,
+    });
     ui.showNotification('正在获取电台信息...', 'info');
 
     try {
         const radio = await api.getRadioDetail(parseInt(rid, 10));
         if (!radio) {
+            setPlaylistActionState(action, {
+                message: '未找到该电台',
+                type: 'error',
+            });
             ui.showNotification('未找到该电台', 'warning');
             return;
         }
@@ -1131,9 +1319,17 @@ async function handleAddRadio(): Promise<void> {
         const container = getElement('#userPlaylistsContainer');
         if (container) (container as HTMLElement).style.display = '';
 
+        setPlaylistActionState(action, {
+            message: `已添加电台「${radio.name}」`,
+            type: 'success',
+        });
         ui.showNotification(`已添加电台「${radio.name}」`, 'success');
     } catch (error) {
         logger.error('Add radio failed:', error);
+        setPlaylistActionState(action, {
+            message: '添加电台失败，请稍后重试',
+            type: 'error',
+        });
         ui.showNotification('添加电台失败', 'error');
     }
 }

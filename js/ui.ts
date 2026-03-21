@@ -104,6 +104,17 @@ let currentScrollState: ScrollState | null = null;
 let currentScrollHandler: (() => void) | null = null;
 let currentScrollContainer: HTMLElement | null = null;
 
+type PlaylistActionFeedbackType = 'neutral' | 'info' | 'success' | 'error';
+type PlaylistActionFormStateOptions = {
+    placeholder: string;
+    buttonLabel: string;
+    iconClass: string;
+    isSubmitting?: boolean;
+    isDisabled?: boolean;
+    feedbackMessage?: string;
+    feedbackType?: PlaylistActionFeedbackType;
+};
+
 function dispatchUiSyncEvent(eventName: 'music888:favorites-updated'): void {
     document.dispatchEvent(new CustomEvent(eventName));
 }
@@ -339,6 +350,41 @@ export function renderFeedbackState(containerId: string, options: FeedbackRender
             ${descriptionHtml}
         </div>
     `;
+}
+
+/**
+ * 同步“我的”动作输入区的占位、按钮与反馈状态
+ */
+export function syncPlaylistActionFormState(options: PlaylistActionFormStateOptions): void {
+    const input = getElement<HTMLInputElement>('#playlistActionInput');
+    const select = getElement<HTMLSelectElement>('#playlistActionSelect');
+    const button = getElement<HTMLButtonElement>('#playlistActionBtn');
+    const feedback = getElement('#playlistActionFeedback');
+
+    if (input) {
+        input.placeholder = options.placeholder;
+        input.disabled = options.isSubmitting ?? false;
+        input.setAttribute('aria-busy', options.isSubmitting ? 'true' : 'false');
+    }
+
+    if (select) {
+        select.disabled = options.isSubmitting ?? false;
+    }
+
+    if (button) {
+        const icon = button.querySelector('i');
+        const text = button.querySelector('span');
+        if (icon) icon.className = options.iconClass;
+        if (text) text.textContent = options.buttonLabel;
+        button.disabled = options.isDisabled ?? options.isSubmitting ?? false;
+        button.dataset.submitting = options.isSubmitting ? 'true' : 'false';
+        button.setAttribute('aria-busy', options.isSubmitting ? 'true' : 'false');
+    }
+
+    if (feedback && options.feedbackMessage) {
+        feedback.textContent = options.feedbackMessage;
+        feedback.setAttribute('data-playlist-feedback-type', options.feedbackType ?? 'neutral');
+    }
 }
 
 /**

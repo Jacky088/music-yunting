@@ -139,6 +139,13 @@
 
             <!-- 歌手标签 -->
             <div id="artistTab" class="tab-content">
+                <div class="section-shell-header" data-discovery-shell="artist-list">
+                    <div class="section-shell-copy">
+                        <div class="section-shell-kicker">发现</div>
+                        <h3 class="section-shell-title">歌手</h3>
+                        <p class="section-shell-subtitle">按地区、分类和首字母筛选</p>
+                    </div>
+                </div>
                 <div class="filter-group" id="artistFilter">
                     <div class="filter-bar" id="artistAreaFilter">
                         <span class="filter-label">地区</span>
@@ -190,9 +197,16 @@
                 <div id="artistGrid" class="artist-grid"></div>
                 <!-- 歌手详情视图（介绍 + 专辑） -->
                 <div id="artistDetailView" style="display:none;">
-                    <button class="back-btn" id="backToArtists">
-                        <i class="fas fa-arrow-left"></i> 返回歌手列表
-                    </button>
+                    <div class="section-shell-header section-shell-header-with-back" data-discovery-shell="artist-detail">
+                        <button class="back-btn" id="backToArtists">
+                            <i class="fas fa-arrow-left"></i> 返回歌手列表
+                        </button>
+                        <div class="section-shell-copy">
+                            <div class="section-shell-kicker">歌手</div>
+                            <h3 class="section-shell-title">歌手详情</h3>
+                            <p class="section-shell-subtitle">简介与专辑</p>
+                        </div>
+                    </div>
                     <div class="artist-songs-header" id="artistDetailHeader"></div>
                     <div class="artist-desc" id="artistDesc"></div>
                     <h4 class="artist-section-label"><i class="fas fa-compact-disc"></i> 专辑</h4>
@@ -200,9 +214,16 @@
                 </div>
                 <!-- 专辑歌曲视图 -->
                 <div id="albumSongsView" style="display:none;">
-                    <button class="back-btn" id="backToArtistDetail">
-                        <i class="fas fa-arrow-left"></i> 返回歌手详情
-                    </button>
+                    <div class="section-shell-header section-shell-header-with-back" data-discovery-shell="album-songs">
+                        <button class="back-btn" id="backToArtistDetail">
+                            <i class="fas fa-arrow-left"></i> 返回歌手详情
+                        </button>
+                        <div class="section-shell-copy">
+                            <div class="section-shell-kicker">专辑</div>
+                            <h3 class="section-shell-title">专辑歌曲</h3>
+                            <p class="section-shell-subtitle">查看当前专辑的全部曲目</p>
+                        </div>
+                    </div>
                     <div class="artist-songs-header" id="albumSongsHeader"></div>
                     <div class="search-results" id="albumSongsResults"></div>
                 </div>
@@ -211,13 +232,27 @@
             <!-- 电台标签 -->
             <div id="radioTab" class="tab-content">
                 <div id="radioListView">
+                    <div class="section-shell-header" data-discovery-shell="radio-list">
+                        <div class="section-shell-copy">
+                            <div class="section-shell-kicker">发现</div>
+                            <h3 class="section-shell-title">电台</h3>
+                            <p class="section-shell-subtitle">先选分类，再进入节目列表播放</p>
+                        </div>
+                    </div>
                     <div class="filter-bar" id="radioFilter">
                         <button class="filter-btn active" data-cateid="0">热门</button>
                     </div>
                     <div id="radioList" class="radio-list"></div>
                 </div>
                 <div id="radioProgramsView" style="display:none;">
-                    <button class="back-btn" id="backToRadios"><i class="fas fa-arrow-left"></i> 返回电台列表</button>
+                    <div class="section-shell-header section-shell-header-with-back" data-discovery-shell="radio-programs">
+                        <button class="back-btn" id="backToRadios"><i class="fas fa-arrow-left"></i> 返回电台列表</button>
+                        <div class="section-shell-copy">
+                            <div class="section-shell-kicker">电台</div>
+                            <h3 class="section-shell-title">节目列表</h3>
+                            <p class="section-shell-subtitle">点击节目即可直接播放</p>
+                        </div>
+                    </div>
                     <div class="radio-programs-header" id="radioProgramsHeader"></div>
                     <div class="search-results" id="radioProgramResults"></div>
                 </div>
@@ -309,6 +344,12 @@
                         <i class="fas fa-user"></i> <span>加载</span>
                     </button>
                 </div>
+                <div
+                    id="playlistActionFeedback"
+                    class="playlist-action-feedback"
+                    data-playlist-feedback-type="neutral"
+                    aria-live="polite"
+                >输入用户 ID 后加载公开歌单</div>
                 <!-- 合并歌单/电台列表 -->
                 <div id="userPlaylistsContainer" class="user-playlists-container" style="display:none">
                     <h4><i class="fas fa-list-music"></i> 我的歌单</h4>
@@ -316,7 +357,7 @@
                 </div>
                 <!-- 歌单内容显示 -->
                 <div class="search-results" id="parseResults">
-                    <div class="empty-state">
+                    <div class="empty-state" data-feedback-state="empty">
                         <i class="fas fa-music"></i>
                         <div>选择模式并输入ID，加载歌单或电台</div>
                         <div style="margin-top: 10px; font-size: 12px; color: rgba(255, 255, 255, 0.5);">

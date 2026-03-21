@@ -34,6 +34,7 @@ import {
     RadioDetailResponse
 } from '../types';
 
+import { logger } from '../config';
 import { fetchWithRetry } from './client';
 import {
     getGDStudioApiUrl,
@@ -41,8 +42,7 @@ import {
     getMetingApiUrl,
     isGDStudioApiAvailable,
     markGDStudioApiAvailable,
-    markGDStudioApiUnavailable,
-    currentAPI
+    markGDStudioApiUnavailable
 } from './sources';
 
 /**
@@ -135,7 +135,7 @@ export async function parsePlaylistAPI(playlistUrlOrId: string): Promise<Playlis
         throw new Error('无效的歌单ID，请输入纯数字ID或包含ID的链接');
     }
 
-    if (currentAPI.type === 'nec') {
+    try {
         const res = await fetchWithRetry(`${getNecApiUrl()}/playlist/detail?id=${id}`);
         const data: NeteasePlaylistDetailResponse = await res.json();
         if (data.code === 200 && data.playlist) {
@@ -146,7 +146,11 @@ export async function parsePlaylistAPI(playlistUrlOrId: string): Promise<Playlis
                 return { songs: detailData.songs.map(convertNeteaseDetailToSong), name: data.playlist.name };
             }
         }
-    } else {
+    } catch (error) {
+        logger.warn('NEC 歌单解析失败，回退到 Meting:', error);
+    }
+
+    try {
         const res = await fetchWithRetry(`${getMetingApiUrl()}/?type=playlist&id=${id}`);
         const data = await res.json();
         if (Array.isArray(data)) {
@@ -164,7 +168,10 @@ export async function parsePlaylistAPI(playlistUrlOrId: string): Promise<Playlis
                 name: '网易云歌单'
             };
         }
+    } catch {
+        // 统一走下方错误提示
     }
+
     throw new Error('歌单解析失败');
 }
 

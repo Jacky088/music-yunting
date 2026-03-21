@@ -294,6 +294,92 @@ describe('UI Helper Functions', () => {
             expect(container.textContent).toContain('暂无数据');
         });
     });
+
+    describe('syncPlaylistActionFormState', () => {
+        it('应根据模式切换占位文案、按钮文案和反馈信息', async () => {
+            const uiModule = await import('./ui');
+            const syncPlaylistActionFormState = (
+                uiModule as {
+                    syncPlaylistActionFormState?: (options: {
+                        placeholder: string;
+                        buttonLabel: string;
+                        iconClass: string;
+                        feedbackMessage?: string;
+                        feedbackType?: string;
+                    }) => void;
+                }
+            ).syncPlaylistActionFormState;
+
+            expect(syncPlaylistActionFormState).toBeTypeOf('function');
+
+            document.body.innerHTML = `
+                <input id="playlistActionInput" />
+                <button id="playlistActionBtn"><i></i><span></span></button>
+                <div id="playlistActionFeedback"></div>
+            `;
+
+            syncPlaylistActionFormState?.({
+                placeholder: '输入歌单ID或链接...',
+                buttonLabel: '解析',
+                iconClass: 'fas fa-cloud-download-alt',
+                feedbackMessage: '准备解析歌单',
+                feedbackType: 'info',
+            });
+
+            expect(document.getElementById('playlistActionInput')?.getAttribute('placeholder')).toBe(
+                '输入歌单ID或链接...'
+            );
+            expect(document.querySelector('#playlistActionBtn span')?.textContent).toBe('解析');
+            expect(document.querySelector('#playlistActionBtn i')?.className).toBe(
+                'fas fa-cloud-download-alt'
+            );
+            expect(
+                document
+                    .getElementById('playlistActionFeedback')
+                    ?.getAttribute('data-playlist-feedback-type')
+            ).toBe('info');
+            expect(document.getElementById('playlistActionFeedback')?.textContent).toContain(
+                '准备解析歌单'
+            );
+        });
+
+        it('提交中时应禁用输入与按钮并暴露忙碌状态', async () => {
+            const uiModule = await import('./ui');
+            const syncPlaylistActionFormState = (
+                uiModule as {
+                    syncPlaylistActionFormState?: (options: {
+                        placeholder: string;
+                        buttonLabel: string;
+                        iconClass: string;
+                        isSubmitting?: boolean;
+                    }) => void;
+                }
+            ).syncPlaylistActionFormState;
+
+            expect(syncPlaylistActionFormState).toBeTypeOf('function');
+
+            document.body.innerHTML = `
+                <input id="playlistActionInput" />
+                <button id="playlistActionBtn"><i></i><span></span></button>
+                <div id="playlistActionFeedback"></div>
+            `;
+
+            syncPlaylistActionFormState?.({
+                placeholder: '输入电台ID...',
+                buttonLabel: '添加',
+                iconClass: 'fas fa-podcast',
+                isSubmitting: true,
+            });
+
+            const input = document.getElementById('playlistActionInput') as HTMLInputElement | null;
+            const button = document.getElementById('playlistActionBtn') as HTMLButtonElement | null;
+
+            expect(input?.disabled).toBe(true);
+            expect(button?.disabled).toBe(true);
+            expect(button?.getAttribute('aria-busy')).toBe('true');
+            expect(button?.dataset.submitting).toBe('true');
+        });
+    });
 });
 
 describe('Lyrics Display', () => {
