@@ -8,6 +8,9 @@ vi.mock('./player', () => ({
     isSongInFavorites: vi.fn(() => false),
     toggleFavoriteButton: vi.fn(),
     playSong: vi.fn(),
+    updatePlayerFavoriteButton: vi.fn(),
+    getCurrentSong: vi.fn(() => null),
+    getFavorites: vi.fn(() => []),
 }));
 
 // Mock api 模块
@@ -112,6 +115,40 @@ describe('UI Helper Functions', () => {
 
             const songItems = container.querySelectorAll('.song-item');
             expect(songItems.length).toBe(2);
+        });
+
+        it('点击收藏按钮后应派发右栏同步事件', async () => {
+            const { displaySearchResults } = await import('./ui');
+
+            const container = document.createElement('div');
+            container.id = 'testResults';
+            document.body.appendChild(container);
+
+            const songs: Song[] = [
+                {
+                    id: '1',
+                    name: '测试歌曲1',
+                    artist: ['歌手1'],
+                    album: '专辑1',
+                    pic_id: 'pic1',
+                    lyric_id: 'lyric1',
+                    source: 'netease',
+                },
+            ];
+
+            const syncListener = vi.fn();
+            document.addEventListener('music888:favorites-updated', syncListener as EventListener);
+
+            displaySearchResults(songs, 'testResults', songs);
+
+            const favoriteButton = container.querySelector('.favorite-btn') as HTMLButtonElement | null;
+            expect(favoriteButton).not.toBeNull();
+
+            favoriteButton?.click();
+
+            expect(syncListener).toHaveBeenCalledTimes(1);
+
+            document.removeEventListener('music888:favorites-updated', syncListener as EventListener);
         });
     });
 

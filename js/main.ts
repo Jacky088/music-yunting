@@ -373,8 +373,7 @@ function bindEventListeners(): void {
             const currentSong = player.getCurrentSong();
             if (currentSong) {
                 player.toggleFavoriteButton(currentSong);
-                // 更新收藏列表
-                setTimeout(loadFavorites, 100);
+                document.dispatchEvent(new CustomEvent('music888:favorites-updated'));
             } else {
                 ui.showNotification('请先选择一首歌曲', 'warning');
             }
@@ -503,6 +502,14 @@ function bindEventListeners(): void {
                 switchMyTab(tabName);
             }
         });
+    });
+
+    document.addEventListener('music888:favorites-updated', () => {
+        loadFavorites();
+    });
+
+    document.addEventListener('music888:history-updated', () => {
+        loadPlayHistory();
     });
 
     // NOTE: 全局键盘快捷键

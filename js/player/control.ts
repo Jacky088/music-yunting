@@ -58,7 +58,6 @@ export async function playSong(
         // 2. 更新状态
         setCurrentPlaylist(playlist);
         setCurrentIndex(index);
-        if (!fromHistory) addToHistory(song);
 
         // 3. 换源并播放
         await fadeOut(audioPlayer);
@@ -70,6 +69,13 @@ export async function playSong(
             await playPromise;
             fadeIn(audioPlayer);
         }
+
+        if (!fromHistory) {
+            addToHistory(song);
+            document.dispatchEvent(new CustomEvent('music888:history-updated'));
+        }
+        ui.updateCurrentSongInfo(song, song.pic_url || '');
+        ui.updateActiveItem(index, _containerId);
 
         // 移动端播放成功后自动切换到播放器页面
         if (window.innerWidth <= 768 && typeof window.switchMobilePage === 'function') {

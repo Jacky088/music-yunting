@@ -104,6 +104,10 @@ let currentScrollState: ScrollState | null = null;
 let currentScrollHandler: (() => void) | null = null;
 let currentScrollContainer: HTMLElement | null = null;
 
+function dispatchUiSyncEvent(eventName: 'music888:favorites-updated'): void {
+    document.dispatchEvent(new CustomEvent(eventName));
+}
+
 /**
  * 渲染歌曲列表项
  */
@@ -163,6 +167,17 @@ function renderSongItems(songs: Song[], startIndex: number, container: HTMLEleme
                         (icon as HTMLElement).style.color = '';
                     }
                 }
+
+                const currentSong = player.getCurrentSong();
+                if (
+                    currentSong &&
+                    currentSong.id === song.id &&
+                    (currentSong.source || 'netease') === (song.source || 'netease')
+                ) {
+                    player.updatePlayerFavoriteButton(player.isSongInFavorites(song));
+                }
+
+                dispatchUiSyncEvent('music888:favorites-updated');
             });
         }
 

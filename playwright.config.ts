@@ -44,14 +44,14 @@ export default defineConfig({
   projects: [
     {
       name: 'desktop-chromium',
-      testMatch: '**/smoke.spec.ts',
+      testIgnore: ['**/mobile-smoke.spec.ts', '**/*.mobile.spec.ts'],
       use: {
         ...devices['Desktop Chrome'],
       },
     },
     {
       name: 'mobile-chromium',
-      testMatch: '**/mobile-smoke.spec.ts',
+      testMatch: ['**/mobile-smoke.spec.ts', '**/*.mobile.spec.ts'],
       use: {
         ...devices['Pixel 5'],
       },
