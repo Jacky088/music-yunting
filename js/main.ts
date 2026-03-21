@@ -6,7 +6,18 @@ import * as api from './api';
 import * as ui from './ui';
 import * as player from './player';
 import { getElement, ensureHttps } from './utils';
-import { MusicError, ArtistInfo, AlbumInfo, RadioStation, RadioProgram, RadioCategory, Song, UserPlaylist } from './types';
+import {
+    MusicError,
+    ArtistInfo,
+    AlbumInfo,
+    RadioStation,
+    RadioProgram,
+    UserPlaylist,
+    MainTabName,
+    MyTabName,
+    PlaylistActionMode,
+    PlaylistActionUiConfig,
+} from './types';
 import { logger } from './config';
 import { initPerformanceMonitoring } from './perf';
 
@@ -36,6 +47,32 @@ let touchStartX = 0;
 let touchStartY = 0;
 let touchEndX = 0;
 let touchEndY = 0;
+
+const PLAYLIST_ACTION_UI: Record<PlaylistActionMode, PlaylistActionUiConfig> = {
+    user: {
+        placeholder: '输入网易云用户ID...',
+        buttonLabel: '加载',
+        iconClass: 'fas fa-user',
+    },
+    radio: {
+        placeholder: '输入电台ID...',
+        buttonLabel: '添加',
+        iconClass: 'fas fa-podcast',
+    },
+    playlist: {
+        placeholder: '输入歌单ID或链接...',
+        buttonLabel: '解析',
+        iconClass: 'fas fa-cloud-download-alt',
+    },
+};
+
+function isPlaylistActionMode(value: string): value is PlaylistActionMode {
+    return value === 'user' || value === 'radio' || value === 'playlist';
+}
+
+function getPlaylistActionMode(value: string): PlaylistActionMode {
+    return isPlaylistActionMode(value) ? value : 'user';
+}
 
 /**
  * 切换移动端页面
@@ -80,11 +117,47 @@ window.addEventListener('unhandledrejection', event => {
 });
 
 // --- Tab Switching Logic ---
+function applyViewVisibility(showIds: string[], hideIds: string[]): void {
+    showIds.forEach(id => {
+        const element = getElement(`#${id}`);
+        if (element) {
+            (element as HTMLElement).style.display = '';
+        }
+    });
+
+    hideIds.forEach(id => {
+        const element = getElement(`#${id}`);
+        if (element) {
+            (element as HTMLElement).style.display = 'none';
+        }
+    });
+}
+
+function syncPlaylistActionUi(action: PlaylistActionMode): void {
+    const input = getElement<HTMLInputElement>('#playlistActionInput');
+    const btn = getElement('#playlistActionBtn');
+    if (!input || !btn) return;
+
+    const config = PLAYLIST_ACTION_UI[action];
+    const icon = btn.querySelector('i');
+    const span = btn.querySelector('span');
+
+    input.placeholder = config.placeholder;
+    if (icon) icon.className = config.iconClass;
+    if (span) span.textContent = config.buttonLabel;
+}
+
+function triggerSearchOnEnter(key: string, onSearch: () => void): void {
+    if (key === 'Enter') {
+        onSearch();
+    }
+}
+
 /**
  * 切换标签页
  * @param tabName 标签名称
  */
-function switchTab(tabName: string): void {
+function switchTab(tabName: MainTabName): void {
     document.querySelectorAll('.tab-content').forEach(content => {
         (content as HTMLElement).style.display = 'none';
         content.classList.remove('active');
@@ -103,6 +176,34 @@ function switchTab(tabName: string): void {
     if (selectedTabButton) {
         selectedTabButton.classList.add('active');
     }
+}
+
+function showPrimaryContentTab(tabName: MainTabName): void {
+    switchTab(tabName);
+
+    if (window.innerWidth <= 768) {
+        switchMobilePage(0);
+    }
+}
+
+function showArtistListView(): void {
+    applyViewVisibility(['artistGrid', 'artistFilter'], ['artistDetailView', 'albumSongsView']);
+}
+
+function showArtistDetailView(): void {
+    applyViewVisibility(['artistDetailView'], ['artistGrid', 'artistFilter', 'albumSongsView']);
+}
+
+function showAlbumSongsDetailView(): void {
+    applyViewVisibility(['albumSongsView'], ['artistDetailView']);
+}
+
+function showRadioListView(): void {
+    applyViewVisibility(['radioListView'], ['radioProgramsView']);
+}
+
+function showRadioProgramsView(): void {
+    applyViewVisibility(['radioProgramsView'], ['radioListView']);
 }
 
 /**
@@ -180,9 +281,9 @@ function bindEventListeners(): void {
     // NOTE: 搜索输入框回车立即搜索（使用 keydown 以补获所有输入法的 Enter 事件）
     if (searchInput) {
         searchInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                handleSearch();
-            }
+            triggerSearchOnEnter(e.key, () => {
+                void handleSearch();
+            });
         });
     }
 
@@ -193,31 +294,10 @@ function bindEventListeners(): void {
     // 下拉选择器切换事件
     if (playlistActionSelect) {
         playlistActionSelect.addEventListener('change', () => {
-            const input = getElement<HTMLInputElement>('#playlistActionInput');
-            const btn = getElement('#playlistActionBtn');
-            if (!input || !btn) return;
-
-            const icon = btn.querySelector('i');
-            const span = btn.querySelector('span');
-
-            switch (playlistActionSelect.value) {
-                case 'user':
-                    input.placeholder = '输入网易云用户ID...';
-                    if (icon) icon.className = 'fas fa-user';
-                    if (span) span.textContent = '加载';
-                    break;
-                case 'radio':
-                    input.placeholder = '输入电台ID...';
-                    if (icon) icon.className = 'fas fa-podcast';
-                    if (span) span.textContent = '添加';
-                    break;
-                case 'playlist':
-                    input.placeholder = '输入歌单ID或链接...';
-                    if (icon) icon.className = 'fas fa-cloud-download-alt';
-                    if (span) span.textContent = '解析';
-                    break;
-            }
+            syncPlaylistActionUi(getPlaylistActionMode(playlistActionSelect.value));
         });
+
+        syncPlaylistActionUi(getPlaylistActionMode(playlistActionSelect.value));
     }
 
     // 统一按钮分发
@@ -226,15 +306,15 @@ function bindEventListeners(): void {
             const select = getElement<HTMLSelectElement>('#playlistActionSelect');
             if (!select) return;
 
-            switch (select.value) {
+            switch (getPlaylistActionMode(select.value)) {
                 case 'user':
-                    handleLoadUserPlaylists();
+                    void handleLoadUserPlaylists();
                     break;
                 case 'radio':
-                    handleAddRadio();
+                    void handleAddRadio();
                     break;
                 case 'playlist':
-                    handleParsePlaylist();
+                    void handleParsePlaylist();
                     break;
             }
         });
@@ -305,7 +385,7 @@ function bindEventListeners(): void {
     document.querySelectorAll('.tab-btn').forEach(button => {
         button.addEventListener('click', () => {
             const tabName = (button as HTMLElement).dataset.tab;
-            if (tabName) {
+            if (tabName === 'hot' || tabName === 'ranking' || tabName === 'artist' || tabName === 'radio') {
                 switchTab(tabName);
 
                 // 切换到"排行榜"标签时，默认加载热歌榜（如果尚未加载）
@@ -356,10 +436,7 @@ function bindEventListeners(): void {
     if (clearHistoryBtn) {
         clearHistoryBtn.addEventListener('click', () => {
             player.clearPlayHistory();
-            const container = getElement('#historyResults');
-            if (container) {
-                container.innerHTML = `<div class="empty-state"><i class="fas fa-history"></i><div>暂无播放记录</div></div>`;
-            }
+            ui.showEmptyState('historyResults', '暂无播放记录', 'fas fa-history');
             ui.showNotification('播放历史已清空', 'success');
         });
     }
@@ -398,12 +475,7 @@ function bindEventListeners(): void {
     const backToArtists = getElement('#backToArtists');
     if (backToArtists) {
         backToArtists.addEventListener('click', () => {
-            const artistGrid = getElement('#artistGrid');
-            const artistFilter = getElement('#artistFilter');
-            const artistDetailView = getElement('#artistDetailView');
-            if (artistGrid) (artistGrid as HTMLElement).style.display = '';
-            if (artistFilter) (artistFilter as HTMLElement).style.display = '';
-            if (artistDetailView) (artistDetailView as HTMLElement).style.display = 'none';
+            showArtistListView();
         });
     }
 
@@ -411,10 +483,7 @@ function bindEventListeners(): void {
     const backToArtistDetail = getElement('#backToArtistDetail');
     if (backToArtistDetail) {
         backToArtistDetail.addEventListener('click', () => {
-            const artistDetailView = getElement('#artistDetailView');
-            const albumSongsView = getElement('#albumSongsView');
-            if (artistDetailView) (artistDetailView as HTMLElement).style.display = '';
-            if (albumSongsView) (albumSongsView as HTMLElement).style.display = 'none';
+            applyViewVisibility(['artistDetailView'], ['albumSongsView']);
         });
     }
 
@@ -422,10 +491,7 @@ function bindEventListeners(): void {
     const backToRadios = getElement('#backToRadios');
     if (backToRadios) {
         backToRadios.addEventListener('click', () => {
-            const radioListView = getElement('#radioListView');
-            const radioProgramsView = getElement('#radioProgramsView');
-            if (radioListView) (radioListView as HTMLElement).style.display = '';
-            if (radioProgramsView) (radioProgramsView as HTMLElement).style.display = 'none';
+            showRadioListView();
         });
     }
 
@@ -433,7 +499,9 @@ function bindEventListeners(): void {
     document.querySelectorAll('.my-tab-btn').forEach(button => {
         button.addEventListener('click', () => {
             const tabName = (button as HTMLElement).dataset.mytab;
-            if (tabName) switchMyTab(tabName);
+            if (tabName === 'playlist' || tabName === 'favorites' || tabName === 'history') {
+                switchMyTab(tabName);
+            }
         });
     });
 
@@ -507,12 +575,7 @@ async function handleSearch(): Promise<void> {
     }
 
     // 搜索时自动切换到搜索标签
-    switchTab('hot');
-
-    // 移动端：自动切换到内容页面（page 0）以显示搜索结果
-    if (window.innerWidth <= 768) {
-        switchMobilePage(0);
-    }
+    showPrimaryContentTab('hot');
 
     // 搜索结果滚动到顶部
     const searchResults = document.getElementById('searchResults');
@@ -543,12 +606,7 @@ async function handleSearch(): Promise<void> {
  */
 async function handleExplore(): Promise<void> {
     // 自动切换到搜索标签
-    switchTab('hot');
-
-    // 移动端：自动切换到内容页面（page 0）
-    if (window.innerWidth <= 768) {
-        switchMobilePage(0);
-    }
+    showPrimaryContentTab('hot');
 
     ui.showLoading('searchResults');
 
@@ -613,7 +671,7 @@ function loadMyTabData(): void {
 /**
  * 切换右栏"我的"子标签
  */
-function switchMyTab(tabName: string): void {
+function switchMyTab(tabName: MyTabName): void {
     document.querySelectorAll('.my-tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.my-tab-content').forEach(content => {
         content.classList.remove('active');
@@ -651,18 +709,17 @@ async function handleLoadArtists(area: number, type: number = -1, initial: strin
         artistCurrentType = type;
         artistCurrentInitial = initial;
         if (artistGrid) {
-            artistGrid.innerHTML = `<div class="empty-state" style="grid-column: 1/-1;"><i class="fas fa-spinner fa-spin"></i><div>正在加载...</div></div>`;
+            ui.renderFeedbackState('artistGrid', {
+                state: 'loading',
+                message: '正在加载...',
+                iconClass: 'fas fa-spinner fa-spin',
+                contentStyle: 'grid-column: 1/-1;',
+            });
         }
     }
 
     // 确保歌手网格和筛选器可见，隐藏详情视图
-    const artistFilter = getElement('#artistFilter');
-    const artistDetailView = getElement('#artistDetailView');
-    const albumSongsView = getElement('#albumSongsView');
-    if (artistGrid) (artistGrid as HTMLElement).style.display = '';
-    if (artistFilter) (artistFilter as HTMLElement).style.display = '';
-    if (artistDetailView) (artistDetailView as HTMLElement).style.display = 'none';
-    if (albumSongsView) (albumSongsView as HTMLElement).style.display = 'none';
+    showArtistListView();
 
     try {
         const result = await api.getArtistList(area, type, initial, 60, artistOffset);
@@ -676,7 +733,11 @@ async function handleLoadArtists(area: number, type: number = -1, initial: strin
     } catch (error) {
         logger.error('Load artists failed:', error);
         if (artistGrid && !append) {
-            artistGrid.innerHTML = `<div class="empty-state" style="grid-column: 1/-1;"><i class="fas fa-exclamation-triangle"></i><div>加载歌手失败</div></div>`;
+            ui.showError('加载歌手失败', 'artistGrid');
+            const feedback = artistGrid.querySelector('[data-feedback-state="error"]');
+            if (feedback) {
+                (feedback as HTMLElement).style.gridColumn = '1/-1';
+            }
         }
     }
 }
@@ -685,16 +746,11 @@ async function handleLoadArtists(area: number, type: number = -1, initial: strin
  * 点击歌手，显示歌手详情（简介 + 专辑网格）
  */
 async function handleArtistClick(artist: ArtistInfo): Promise<void> {
-    const artistGrid = getElement('#artistGrid');
-    const artistFilter = getElement('#artistFilter');
-    const artistDetailView = getElement('#artistDetailView');
     const artistDetailHeader = getElement('#artistDetailHeader');
     const artistDesc = getElement('#artistDesc');
 
     // 切换视图：隐藏网格，显示歌手详情
-    if (artistGrid) (artistGrid as HTMLElement).style.display = 'none';
-    if (artistFilter) (artistFilter as HTMLElement).style.display = 'none';
-    if (artistDetailView) (artistDetailView as HTMLElement).style.display = '';
+    showArtistDetailView();
 
     // 渲染歌手头部信息
     if (artistDetailHeader) {
@@ -785,13 +841,10 @@ async function loadMoreArtistAlbums(): Promise<void> {
  * 点击专辑，显示专辑歌曲列表
  */
 async function handleAlbumClick(album: AlbumInfo): Promise<void> {
-    const artistDetailView = getElement('#artistDetailView');
-    const albumSongsView = getElement('#albumSongsView');
     const albumSongsHeader = getElement('#albumSongsHeader');
 
     // 切换视图
-    if (artistDetailView) (artistDetailView as HTMLElement).style.display = 'none';
-    if (albumSongsView) (albumSongsView as HTMLElement).style.display = '';
+    showAlbumSongsDetailView();
 
     // 渲染专辑头部
     if (albumSongsHeader) {
@@ -868,15 +921,12 @@ async function handleLoadRadio(append: boolean = false): Promise<void> {
     if (!append) {
         radioOffset = 0;
         if (radioList) {
-            radioList.innerHTML = `<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><div>正在加载...</div></div>`;
+            ui.showLoading('radioList');
         }
     }
 
     // 确保电台列表视图可见
-    const radioListView = getElement('#radioListView');
-    const radioProgramsView = getElement('#radioProgramsView');
-    if (radioListView) (radioListView as HTMLElement).style.display = '';
-    if (radioProgramsView) (radioProgramsView as HTMLElement).style.display = 'none';
+    showRadioListView();
 
     try {
         let result: { radios: RadioStation[], hasMore: boolean };
@@ -895,7 +945,7 @@ async function handleLoadRadio(append: boolean = false): Promise<void> {
     } catch (error) {
         logger.error('Load radio failed:', error);
         if (radioList && !append) {
-            radioList.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><div>加载电台失败</div></div>`;
+            ui.showError('加载电台失败', 'radioList');
         }
     }
 }
@@ -904,13 +954,10 @@ async function handleLoadRadio(append: boolean = false): Promise<void> {
  * 点击电台，加载节目列表
  */
 async function handleRadioClick(radio: RadioStation): Promise<void> {
-    const radioListView = getElement('#radioListView');
-    const radioProgramsView = getElement('#radioProgramsView');
     const radioProgramsHeader = getElement('#radioProgramsHeader');
 
     // 切换视图
-    if (radioListView) (radioListView as HTMLElement).style.display = 'none';
-    if (radioProgramsView) (radioProgramsView as HTMLElement).style.display = '';
+    showRadioProgramsView();
 
     // 渲染电台头部
     if (radioProgramsHeader) {
@@ -969,7 +1016,14 @@ function loadFavorites(): void {
         if (favorites.length > 0) {
             ui.displaySearchResults(favorites, 'favoritesResults', favorites);
         } else {
-            container.innerHTML = `<div class="empty-state"><i class="far fa-heart"></i><div>暂无收藏的歌曲</div><div style="margin-top: 8px; font-size: 12px; opacity: 0.7;">点击歌曲旁的爱心添加收藏</div></div>`;
+            ui.showEmptyState(
+                'favoritesResults',
+                '暂无收藏的歌曲',
+                'far fa-heart',
+                '点击歌曲旁的爱心添加收藏',
+                undefined,
+                'margin-top: 8px; font-size: 12px; opacity: 0.7;'
+            );
         }
     }
 }
@@ -986,7 +1040,7 @@ function loadPlayHistory(): void {
         if (history.length > 0) {
             ui.displaySearchResults(history, 'historyResults', history);
         } else {
-            container.innerHTML = `<div class="empty-state"><i class="fas fa-history"></i><div>暂无播放记录</div></div>`;
+            ui.showEmptyState('historyResults', '暂无播放记录', 'fas fa-history');
         }
     }
 }
@@ -1010,7 +1064,14 @@ async function handleLoadUserPlaylists(): Promise<void> {
     const container = getElement('#userPlaylistsContainer');
     const listEl = getElement('#userPlaylistsList');
     if (container) (container as HTMLElement).style.display = '';
-    if (listEl) listEl.innerHTML = `<div class="empty-state" style="padding:20px"><i class="fas fa-spinner fa-spin"></i><div>正在加载...</div></div>`;
+    if (listEl) {
+        ui.renderFeedbackState('userPlaylistsList', {
+            state: 'loading',
+            message: '正在加载...',
+            iconClass: 'fas fa-spinner fa-spin',
+            contentStyle: 'padding:20px',
+        });
+    }
 
     try {
         const playlists = await api.getUserPlaylists(uid);
@@ -1019,7 +1080,9 @@ async function handleLoadUserPlaylists(): Promise<void> {
         ui.showNotification(`已加载 ${playlists.length} 个歌单`, 'success');
     } catch (error) {
         logger.error('Load user playlists failed:', error);
-        if (listEl) listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><div>加载歌单失败</div></div>`;
+        if (listEl) {
+            ui.showError('加载歌单失败', 'userPlaylistsList');
+        }
         ui.showNotification('加载用户歌单失败', 'error');
     }
 }
@@ -1136,7 +1199,7 @@ function renderUserPlaylistList(playlists: UserPlaylist[], radios: RadioStation[
     listEl.innerHTML = '';
 
     if (playlists.length === 0 && radios.length === 0) {
-        listEl.innerHTML = `<div class="empty-state" style="padding:20px"><i class="fas fa-music"></i><div>暂无歌单或电台</div></div>`;
+        ui.showEmptyState('userPlaylistsList', '暂无歌单或电台', 'fas fa-music', undefined, 'padding:20px');
         return;
     }
 
@@ -1211,6 +1274,7 @@ async function restoreUserPlaylists(): Promise<void> {
     }
     if (actionSelect) {
         actionSelect.value = 'user';
+        syncPlaylistActionUi('user');
     }
 
     const container = getElement('#userPlaylistsContainer');

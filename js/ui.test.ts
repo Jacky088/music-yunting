@@ -65,6 +65,20 @@ describe('UI Helper Functions', () => {
             expect(container.querySelector('.empty-state')).not.toBeNull();
         });
 
+        it('空状态应复用统一反馈结构', async () => {
+            const { displaySearchResults } = await import('./ui');
+
+            const container = document.createElement('div');
+            container.id = 'testResults';
+            document.body.appendChild(container);
+
+            displaySearchResults([], 'testResults', []);
+
+            const feedbackState = container.querySelector('[data-feedback-state="empty"]');
+            expect(feedbackState).not.toBeNull();
+            expect(container.textContent).toContain('未找到相关歌曲');
+        });
+
         it('应渲染歌曲列表', async () => {
             const { displaySearchResults } = await import('./ui');
 
@@ -158,6 +172,21 @@ describe('UI Helper Functions', () => {
             expect(container.querySelector('.loading')).not.toBeNull();
             expect(container.querySelector('.fa-spinner')).not.toBeNull();
         });
+
+        it('应使用统一反馈结构渲染加载状态', async () => {
+            const uiModule = await import('./ui');
+            const { showLoading } = uiModule;
+
+            const container = document.createElement('div');
+            container.id = 'testContainer';
+            document.body.appendChild(container);
+
+            showLoading('testContainer');
+
+            const feedbackState = container.querySelector('[data-feedback-state="loading"]');
+            expect(feedbackState).not.toBeNull();
+            expect(container.textContent).toContain('正在加载...');
+        });
     });
 
     describe('showError', () => {
@@ -186,6 +215,46 @@ describe('UI Helper Functions', () => {
             // 确保脚本标签被转义而不是执行
             expect(container.innerHTML).toContain('&lt;script&gt;');
             expect(container.querySelector('script')).toBeNull();
+        });
+
+        it('应使用统一反馈结构渲染错误状态', async () => {
+            const uiModule = await import('./ui');
+            const { showError } = uiModule;
+
+            const container = document.createElement('div');
+            container.id = 'testContainer';
+            document.body.appendChild(container);
+
+            showError('测试错误', 'testContainer');
+
+            const feedbackState = container.querySelector('[data-feedback-state="error"]');
+            expect(feedbackState).not.toBeNull();
+        });
+    });
+
+    describe('showEmptyState', () => {
+        it('应导出统一空状态渲染入口', async () => {
+            const uiModule = await import('./ui');
+            expect(typeof (uiModule as { showEmptyState?: unknown }).showEmptyState).toBe('function');
+        });
+
+        it('应渲染统一空状态', async () => {
+            const uiModule = await import('./ui');
+            const showEmptyState = (uiModule as { showEmptyState?: (containerId: string, message: string, iconClass?: string) => void })
+                .showEmptyState;
+
+            expect(showEmptyState).toBeTypeOf('function');
+
+            const container = document.createElement('div');
+            container.id = 'testContainer';
+            document.body.appendChild(container);
+
+            showEmptyState?.('testContainer', '暂无数据', 'fas fa-box-open');
+
+            const feedbackState = container.querySelector('[data-feedback-state="empty"]');
+            expect(feedbackState).not.toBeNull();
+            expect(container.querySelector('.fa-box-open')).not.toBeNull();
+            expect(container.textContent).toContain('暂无数据');
         });
     });
 });

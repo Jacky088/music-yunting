@@ -469,6 +469,47 @@ export class MusicError extends Error {
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';
 
 /**
+ * 主区域标签名称
+ */
+export type MainTabName = 'hot' | 'ranking' | 'artist' | 'radio';
+
+/**
+ * “我的”面板子标签名称
+ */
+export type MyTabName = 'playlist' | 'favorites' | 'history';
+
+/**
+ * “我的”面板动作类型
+ */
+export type PlaylistActionMode = 'user' | 'radio' | 'playlist';
+
+/**
+ * 统一反馈状态类型
+ */
+export type FeedbackState = 'loading' | 'empty' | 'error';
+
+/**
+ * 动作输入区 UI 配置
+ */
+export interface PlaylistActionUiConfig {
+    placeholder: string;
+    buttonLabel: string;
+    iconClass: string;
+}
+
+/**
+ * 统一反馈渲染配置
+ */
+export interface FeedbackRenderOptions {
+    state: FeedbackState;
+    message: string;
+    iconClass: string;
+    description?: string;
+    contentStyle?: string;
+    descriptionStyle?: string;
+}
+
+/**
  * DOM 缓存接口
  */
 export interface DOMCache {

@@ -1,5 +1,16 @@
 import * as api from './api';
-import { Song, LyricLine, DOMCache, ScrollState, NotificationType, ArtistInfo, AlbumInfo, RadioStation, RadioProgram } from './types';
+import {
+    Song,
+    LyricLine,
+    DOMCache,
+    ScrollState,
+    NotificationType,
+    ArtistInfo,
+    AlbumInfo,
+    RadioStation,
+    RadioProgram,
+    FeedbackRenderOptions,
+} from './types';
 import * as player from './player';
 import { escapeHtml, formatTime, getElement, ensureHttps } from './utils';
 import { APP_CONFIG, logger } from './config';
@@ -248,7 +259,7 @@ export function displaySearchResults(songs: Song[], containerId: string, playlis
     }
 
     if (songs.length === 0) {
-        container.innerHTML = `<div class="empty-state"><div>未找到相关歌曲</div></div>`;
+        showEmptyState(containerId, '未找到相关歌曲', 'fas fa-search');
         return;
     }
 
@@ -284,6 +295,35 @@ export function displaySearchResults(songs: Song[], containerId: string, playlis
 
     // 监听滚动
     setupInfiniteScroll(container);
+}
+
+/**
+ * 统一渲染空/加载/错误反馈
+ * @param containerId 容器元素 ID
+ * @param options 反馈渲染配置
+ */
+export function renderFeedbackState(containerId: string, options: FeedbackRenderOptions): void {
+    const container = getElement(`#${containerId}`);
+    if (!container) return;
+
+    const variantClassMap: Record<FeedbackRenderOptions['state'], string> = {
+        loading: 'loading',
+        empty: 'empty-state',
+        error: 'error',
+    };
+    const rootClassName = variantClassMap[options.state];
+    const descriptionHtml = options.description
+        ? `<div${options.descriptionStyle ? ` style="${escapeHtml(options.descriptionStyle)}"` : ''}>${escapeHtml(options.description)}</div>`
+        : '';
+    const styleAttr = options.contentStyle ? ` style="${escapeHtml(options.contentStyle)}"` : '';
+
+    container.innerHTML = `
+        <div class="${rootClassName}" data-feedback-state="${options.state}"${styleAttr}>
+            <i class="${escapeHtml(options.iconClass)}"></i>
+            <div>${escapeHtml(options.message)}</div>
+            ${descriptionHtml}
+        </div>
+    `;
 }
 
 /**
@@ -484,10 +524,11 @@ export function updateActiveItem(currentIndex: number, containerId: string): voi
  * @param containerId 容器元素 ID
  */
 export function showLoading(containerId: string = 'searchResults'): void {
-    const container = getElement(`#${containerId}`);
-    if (container) {
-        container.innerHTML = `<div class="loading"><i class="fas fa-spinner"></i><div>正在加载...</div></div>`;
-    }
+    renderFeedbackState(containerId, {
+        state: 'loading',
+        message: '正在加载...',
+        iconClass: 'fas fa-spinner fa-spin',
+    });
 }
 
 /**
@@ -496,11 +537,37 @@ export function showLoading(containerId: string = 'searchResults'): void {
  * @param containerId 容器元素 ID
  */
 export function showError(message: string, containerId: string = 'searchResults'): void {
-    const container = getElement(`#${containerId}`);
-    if (container) {
-        // NOTE: 使用 escapeHtml 转义错误消息
-        container.innerHTML = `<div class="error"><i class="fas fa-exclamation-triangle"></i><div>${escapeHtml(message)}</div></div>`;
-    }
+    renderFeedbackState(containerId, {
+        state: 'error',
+        message,
+        iconClass: 'fas fa-exclamation-triangle',
+    });
+}
+
+/**
+ * 显示空状态
+ * @param containerId 容器元素 ID
+ * @param message 空状态消息
+ * @param iconClass 图标类名
+ * @param description 追加描述
+ * @param contentStyle 反馈元素内联样式
+ */
+export function showEmptyState(
+    containerId: string = 'searchResults',
+    message: string = '暂无数据',
+    iconClass: string = 'fas fa-inbox',
+    description?: string,
+    contentStyle?: string,
+    descriptionStyle?: string
+): void {
+    renderFeedbackState(containerId, {
+        state: 'empty',
+        message,
+        iconClass,
+        description,
+        contentStyle,
+        descriptionStyle,
+    });
 }
 
 /**
@@ -561,7 +628,7 @@ export function displayArtistGrid(
     }
 
     if (artists.length === 0 && !append) {
-        container.innerHTML = `<div class="empty-state"><i class="fas fa-microphone-alt"></i><div>暂无歌手数据</div></div>`;
+        showEmptyState(containerId, '暂无歌手数据', 'fas fa-microphone-alt');
         return;
     }
 
@@ -621,7 +688,7 @@ export function displayRadioList(
     }
 
     if (radios.length === 0 && !append) {
-        container.innerHTML = `<div class="empty-state"><i class="fas fa-podcast"></i><div>暂无电台数据</div></div>`;
+        showEmptyState(containerId, '暂无电台数据', 'fas fa-podcast');
         return;
     }
 
@@ -674,7 +741,7 @@ export function displayRadioPrograms(programs: RadioProgram[], containerId: stri
     container.innerHTML = '';
 
     if (programs.length === 0) {
-        container.innerHTML = `<div class="empty-state"><i class="fas fa-podcast"></i><div>暂无节目</div></div>`;
+        showEmptyState(containerId, '暂无节目', 'fas fa-podcast');
         return;
     }
 
@@ -728,7 +795,7 @@ export function displayAlbumGrid(
     }
 
     if (albums.length === 0 && !append) {
-        container.innerHTML = `<div class="empty-state"><i class="fas fa-compact-disc"></i><div>暂无专辑数据</div></div>`;
+        showEmptyState(containerId, '暂无专辑数据', 'fas fa-compact-disc');
         return;
     }
 
