@@ -11,9 +11,13 @@
     "test:run": "vitest run",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint js --ext .ts",
-    "lint:fix": "eslint js --ext .ts --fix",
-    "format": "prettier --write \"js/**/*.ts\" \"css/**/*.css\""
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:smoke": "playwright test tests/e2e/smoke.spec.ts tests/e2e/mobile-smoke.spec.ts",
+    "lint": "eslint js tests *.ts --ext .ts",
+    "lint:e2e": "eslint playwright.config.ts vitest.config.ts tests/e2e/*.ts --ext .ts",
+    "lint:fix": "eslint js tests *.ts --ext .ts --fix",
+    "format": "prettier --write \"js/**/*.ts\" \"tests/**/*.ts\" \"*.ts\" \"css/**/*.css\""
   },
   "keywords": [
     "music",
@@ -33,6 +37,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@playwright/test": "^1.58.2",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "@vitest/coverage-v8": "^4.0.18",
