@@ -61,7 +61,7 @@ export async function playSong(
 
         // 3. 换源并播放
         await fadeOut(audioPlayer);
-        audioPlayer.src = urlResult.url;
+        audioPlayer.src = api.toPlayableMediaUrl(urlResult.url);
         audioPlayer.load();
 
         const playPromise = audioPlayer.play();
@@ -86,8 +86,13 @@ export async function playSong(
         loadExtraResources(song);
 
     } catch (e) {
-        logger.error('播放失败:', e);
-        ui.showNotification('播放失败，请尝试切换音质或歌曲', 'error');
+        const errorName = (e && typeof e === 'object' && 'name' in e) ? (e as any).name : 'UnknownError';
+        if (errorName === 'AbortError') {
+            logger.debug('播放被中止 (AbortError):', e);
+        } else {
+            logger.error('播放失败:', e);
+            ui.showNotification('播放失败，请尝试切换音质或歌曲', 'error');
+        }
     }
 }
 
