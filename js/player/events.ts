@@ -16,12 +16,20 @@ import {
     getCurrentSong,
     currentPlayRequestId
 } from './core';
-import { nextSong, previousSong, togglePlay } from './control';
+import { nextSong, previousSong } from './control';
 import { fadeIn, fadeOut } from './effects';
 
 /** 正在进行的跨源搜索状态 */
 let isSeekingFullVersion = false;
 let fullVersionSearchCount = 0;
+
+/**
+ * 重置试听检测计数（在新歌曲开始播放时调用）
+ */
+export function resetPreviewDetection(): void {
+    fullVersionSearchCount = 0;
+    isSeekingFullVersion = false;
+}
 /** 切换完整版时的最大回退播放位置（秒） */
 const MAX_SEEK_ON_SWITCH = 10;
 
@@ -117,15 +125,22 @@ async function handleMetadataLoaded(): Promise<void> {
                 const currentTime = audioPlayer.currentTime;
 
                 await fadeOut(audioPlayer);
-                audioPlayer.src = result.url;
+                audioPlayer.src = api.toPlayableMediaUrl(result.url);
                 audioPlayer.load();
 
-                audioPlayer.addEventListener('canplay', () => {
+                const cleanupTimer = setTimeout(() => {
+                    audioPlayer.removeEventListener('canplay', canplayHandler);
+                }, 15000);
+
+                const canplayHandler = () => {
+                    clearTimeout(cleanupTimer);
                     audioPlayer.currentTime = Math.min(currentTime, MAX_SEEK_ON_SWITCH);
                     if (wasPlaying) {
-                        audioPlayer.play().then(() => fadeIn(audioPlayer));
+                        audioPlayer.play().then(() => fadeIn(audioPlayer)).catch(() => {});
                     }
-                }, { once: true });
+                };
+
+                audioPlayer.addEventListener('canplay', canplayHandler, { once: true });
             }
         } catch (e) {
             logger.debug('切换完整版失败', e);

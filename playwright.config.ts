@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
-const baseURL = 'http://127.0.0.1:4174';
+const playwrightPort = process.env.PLAYWRIGHT_PORT ?? '4174';
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${playwrightPort}`;
 const localLibraryPaths = [
   path.join(configDir, '.playwright-libs/usr/lib/x86_64-linux-gnu'),
   path.join(configDir, '.playwright-libs/lib/x86_64-linux-gnu'),
@@ -23,6 +24,7 @@ const launchEnv = shouldInjectLocalLibraries
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
+  workers: 1,
   reporter: 'list',
   timeout: 30_000,
   expect: {
@@ -36,9 +38,9 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4174',
+    command: `npm run dev -- --host 127.0.0.1 --port ${playwrightPort}`,
     url: baseURL,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 120_000,
   },
   projects: [

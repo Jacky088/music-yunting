@@ -16,6 +16,7 @@ import { audioPlayer } from './player/core';
 import { bindAudioEvents } from './player/events';
 import { initializeFavoritesPlaylist, loadSavedPlaylists, loadPlayHistoryFromStorage } from './player/playlist';
 import { loadSavedVolume } from './player/effects';
+import { getElement } from './utils';
 
 /**
  * 初始化播放器
@@ -24,6 +25,10 @@ export function initPlayer(): void {
     // 1. 设置初始音量
     const savedVolume = loadSavedVolume();
     audioPlayer.volume = savedVolume;
+    const volumeSlider = getElement<HTMLInputElement>('#volumeSlider');
+    if (volumeSlider) {
+        volumeSlider.value = Math.round(savedVolume * 100).toString();
+    }
 
     // 2. 初始化持久化数据
     initializeFavoritesPlaylist();
@@ -39,7 +44,7 @@ export function initPlayer(): void {
  * NOTE: 保留在 facade 中用于处理复杂的 UI 联动逻辑
  */
 import { Song } from './types';
-import { toggleFavorite, isSongInFavorites } from './player/playlist';
+import { toggleFavorite } from './player/playlist';
 import * as ui from './ui';
 
 export function toggleFavoriteButton(song: Song): void {

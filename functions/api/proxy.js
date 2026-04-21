@@ -27,16 +27,62 @@ function checkRateLimit(ip) {
     return {
         allowed: data.count <= RATE_LIMIT.maxRequests,
         remaining: Math.max(0, RATE_LIMIT.maxRequests - data.count),
-        reset: data.windowStart + RATE_LIMIT.windowMs
+        reset: data.windowStart + RATE_LIMIT.windowMs,
     };
 }
 
-/** 允许的前端来源（CORS） */
-const ALLOWED_ORIGINS = [
-    'https://music.weny888.com',
-    'http://localhost:5173',
-    'http://localhost:4173',
-];
+/** 允许的前端来源（CORS）- 硬编码基础列表 */
+const BASE_ALLOWED_ORIGINS = ['https://music.weny888.com', 'http://localhost:5173', 'http://localhost:4173'];
+
+function getCorsOrigin(requestOrigin = '', env = {}) {
+    const allowed = [...BASE_ALLOWED_ORIGINS];
+    if (env.EXTRA_ALLOWED_ORIGINS) {
+        for (const o of env.EXTRA_ALLOWED_ORIGINS.split(',')) {
+            const trimmed = o.trim();
+            if (trimmed) allowed.push(trimmed);
+        }
+    }
+    if (requestOrigin && allowed.includes(requestOrigin)) return requestOrigin;
+    if (requestOrigin) {
+        try {
+            const url = new URL(requestOrigin);
+            if (url.hostname.endsWith('.pages.dev')) return requestOrigin;
+        } catch {}
+    }
+    return allowed[0];
+}
+
+function createCorsHeaders(requestOrigin = '', env = {}) {
+    return {
+        'Access-Control-Allow-Origin': getCorsOrigin(requestOrigin, env),
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Turnstile-Token, Range',
+        'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+        'Access-Control-Max-Age': '86400',
+        Vary: 'Origin',
+    };
+}
+
+function createJsonErrorResponse(requestOrigin, status, code, message, extraHeaders = {}, env = {}) {
+    return new Response(
+        JSON.stringify({
+            success: false,
+            error: {
+                code,
+                message,
+                status,
+            },
+        }),
+        {
+            status,
+            headers: {
+                'Content-Type': 'application/json',
+                ...createCorsHeaders(requestOrigin, env),
+                ...extraHeaders,
+            },
+        }
+    );
+}
 
 /** 精确匹配的主机名 */
 const ALLOWED_HOSTS_EXACT = new Set([
@@ -90,9 +136,16 @@ const ALLOWED_HOST_SUFFIXES = [
     '.nf.migu.cn',
 ];
 
-function isHostAllowed(hostname) {
+function isHostAllowed(hostname, env = {}) {
     if (ALLOWED_HOSTS_EXACT.has(hostname)) return true;
-    return ALLOWED_HOST_SUFFIXES.some(suffix => hostname.endsWith(suffix));
+    if (ALLOWED_HOST_SUFFIXES.some(suffix => hostname.endsWith(suffix))) return true;
+    if (env.EXTRA_ALLOWED_HOSTS) {
+        for (const h of env.EXTRA_ALLOWED_HOSTS.split(',')) {
+            const trimmed = h.trim();
+            if (trimmed && (hostname === trimmed || hostname.endsWith('.' + trimmed))) return true;
+        }
+    }
+    return false;
 }
 
 const NETEASE_COOKIE_HOSTS = [
@@ -105,44 +158,44 @@ const NETEASE_COOKIE_HOSTS = [
 export async function onRequest(context) {
     const { request, env } = context;
     const url = new URL(request.url);
+    const requestOrigin = request.headers.get('Origin') || '';
 
     // OPTIONS 预检处理
     if (request.method === 'OPTIONS') {
-        const requestOrigin = request.headers.get('Origin') || '';
-        const corsOrigin = ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : ALLOWED_ORIGINS[0];
         return new Response(null, {
             status: 204,
-            headers: {
-                'Access-Control-Allow-Origin': corsOrigin,
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, X-Turnstile-Token',
-                'Access-Control-Max-Age': '86400',
-            }
+            headers: createCorsHeaders(requestOrigin, env),
         });
     }
 
     const targetUrlParam = url.searchParams.get('url');
 
     if (!targetUrlParam) {
-        return new Response(JSON.stringify({ error: 'URL parameter is required' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' }
-        });
+        return createJsonErrorResponse(requestOrigin, 400, 'MISSING_URL', '缺少请求地址', {}, env);
     }
 
-    const decodedUrl = decodeURIComponent(targetUrlParam);
+    let decodedUrl = '';
+    try {
+        decodedUrl = decodeURIComponent(targetUrlParam);
+    } catch {
+        return createJsonErrorResponse(requestOrigin, 400, 'INVALID_URL', '请求地址格式无效', {}, env);
+    }
+
     const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown';
 
     // 1. 速率限制
     const rate = checkRateLimit(clientIp);
     if (!rate.allowed) {
-        return new Response(JSON.stringify({ error: 'Too Many Requests' }), {
-            status: 429,
-            headers: {
-                'Content-Type': 'application/json',
-                'X-RateLimit-Reset': Math.ceil(rate.reset / 1000).toString()
-            }
-        });
+        return createJsonErrorResponse(
+            requestOrigin,
+            429,
+            'RATE_LIMITED',
+            '请求过于频繁，请稍后再试',
+            {
+                'X-RateLimit-Reset': Math.ceil(rate.reset / 1000).toString(),
+            },
+            env
+        );
     }
 
     // 2. Turnstile 验证（仅日志记录，不阻断请求）
@@ -158,8 +211,8 @@ export async function onRequest(context) {
                 body: JSON.stringify({
                     secret: turnstileSecret,
                     response: turnstileToken,
-                    remoteip: clientIp
-                })
+                    remoteip: clientIp,
+                }),
             });
             const verifyData = await verifyRes.json();
             if (!verifyData.success) {
@@ -171,27 +224,22 @@ export async function onRequest(context) {
     }
 
     // 3. 安全检查
+    let parsedTarget;
     try {
-        const parsedTarget = new URL(decodedUrl);
+        parsedTarget = new URL(decodedUrl);
+    } catch {
+        return createJsonErrorResponse(requestOrigin, 400, 'INVALID_URL', '请求地址格式无效', {}, env);
+    }
 
+    try {
         // 协议验证：仅允许 http/https
         if (parsedTarget.protocol !== 'http:' && parsedTarget.protocol !== 'https:') {
-            return new Response(JSON.stringify({ error: 'Invalid protocol' }), {
-                status: 400,
-                headers: { 'Content-Type': 'application/json' }
-            });
+            return createJsonErrorResponse(requestOrigin, 400, 'INVALID_URL', '请求地址格式无效', {}, env);
         }
 
-        if (!isHostAllowed(parsedTarget.hostname)) {
-            return new Response(JSON.stringify({ error: 'URL not allowed' }), {
-                status: 403,
-                headers: { 'Content-Type': 'application/json' }
-            });
+        if (!isHostAllowed(parsedTarget.hostname, env)) {
+            return createJsonErrorResponse(requestOrigin, 403, 'FORBIDDEN_HOST', '当前域名不允许通过代理访问', {}, env);
         }
-
-        // CORS 来源验证
-        const requestOrigin = request.headers.get('Origin') || '';
-        const corsOrigin = ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : ALLOWED_ORIGINS[0];
 
         // 3. 构建请求头
         const refererMap = {
@@ -202,7 +250,7 @@ export async function onRequest(context) {
             'kuwo.cn': 'https://www.kuwo.cn/',
             'api.i-meto.com': 'https://api.i-meto.com/',
             'ximalaya.com': 'https://www.ximalaya.com/',
-            'xmcdn.com': 'https://www.ximalaya.com/'
+            'xmcdn.com': 'https://www.ximalaya.com/',
         };
 
         let referer = 'https://music.163.com/';
@@ -214,11 +262,19 @@ export async function onRequest(context) {
         }
 
         const headers = new Headers({
-            'Referer': referer,
-            'Origin': referer.replace(/\/$/, ''),
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*'
+            Referer: referer,
+            Origin: referer.replace(/\/$/, ''),
+            'User-Agent':
+                request.headers.get('User-Agent') ||
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: request.headers.get('Accept') || '*/*',
         });
+
+        // 转发 Range 请求头，支持音频拖动/缓冲
+        const rangeHeader = request.headers.get('Range');
+        if (rangeHeader) {
+            headers.set('Range', rangeHeader);
+        }
 
         // 针对 GDStudio API 的特殊处理
         if (parsedTarget.hostname.includes('gdstudio.xyz')) {
@@ -230,8 +286,8 @@ export async function onRequest(context) {
         }
 
         const vipCookie = env.NETEASE_VIP_COOKIE;
-        const isNeteaseHost = NETEASE_COOKIE_HOSTS.some(host =>
-            parsedTarget.hostname === host || parsedTarget.hostname.endsWith('.' + host)
+        const isNeteaseHost = NETEASE_COOKIE_HOSTS.some(
+            host => parsedTarget.hostname === host || parsedTarget.hostname.endsWith('.' + host)
         );
 
         if (vipCookie && isNeteaseHost) {
@@ -242,31 +298,53 @@ export async function onRequest(context) {
         const response = await fetch(parsedTarget.toString(), {
             method: 'GET',
             headers,
-            redirect: 'follow'
+            redirect: 'follow',
         });
+
+        // 5xx 上游错误才返回错误，206 Partial Content 需要正常转发
+        if (response.status >= 500) {
+            return createJsonErrorResponse(
+                requestOrigin,
+                response.status,
+                'UPSTREAM_ERROR',
+                '上游服务响应异常，请稍后重试',
+                {},
+                env
+            );
+        }
 
         // 5. 转发响应
         const newHeaders = new Headers(response.headers);
-        newHeaders.set('Access-Control-Allow-Origin', corsOrigin);
-        newHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        newHeaders.set('Access-Control-Allow-Headers', 'Content-Type, X-Turnstile-Token');
+        Object.entries(createCorsHeaders(requestOrigin, env)).forEach(([key, value]) => {
+            newHeaders.set(key, value);
+        });
 
-        // 音频流处理适配
+        // 音频流处理适配：确保支持 Range 请求
         const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('audio') || contentType.includes('octet-stream')) {
+        const isAudio = contentType.includes('audio') || contentType.includes('octet-stream');
+        if (isAudio) {
             newHeaders.set('Accept-Ranges', 'bytes');
+        }
+
+        // 转发 Content-Range 头（206 响应必需）
+        const contentRange = response.headers.get('Content-Range');
+        if (contentRange) {
+            newHeaders.set('Content-Range', contentRange);
         }
 
         return new Response(response.body, {
             status: response.status,
-            headers: newHeaders
+            headers: newHeaders,
         });
-
     } catch (error) {
         console.error('[proxy] Request failed:', error.message);
-        return new Response(JSON.stringify({ error: 'Failed to proxy request' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' }
-        });
+        return createJsonErrorResponse(
+            requestOrigin,
+            500,
+            'PROXY_REQUEST_FAILED',
+            '代理服务暂时不可用，请稍后重试',
+            {},
+            env
+        );
     }
 }

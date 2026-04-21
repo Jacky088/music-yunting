@@ -4,6 +4,161 @@
  */
 
 import { logger } from '../config';
+import { MusicError, MusicErrorType } from '../types';
+
+export interface StandardizedApiError {
+    code: string;
+    message: string;
+    status?: number;
+    type: MusicErrorType;
+    userMessage: string;
+    retryable: boolean;
+}
+
+const STATUS_USER_MESSAGES: Record<number, string> = {
+    400: '请求地址格式无效',
+    403: '当前资源不允许通过代理访问',
+    429: '请求过于频繁，请稍后再试',
+    500: '代理服务暂时不可用，请稍后重试',
+    502: '上游服务暂时不可用，请稍后重试',
+    503: '服务暂时不可用，请稍后重试',
+    504: '请求超时，请稍后重试',
+};
+
+const ERROR_CODE_USER_MESSAGES: Record<string, string> = {
+    MISSING_URL: '缺少请求地址',
+    INVALID_URL: '请求地址格式无效',
+    FORBIDDEN_HOST: '当前资源不允许通过代理访问',
+    RATE_LIMITED: '请求过于频繁，请稍后再试',
+    UPSTREAM_ERROR: '上游服务响应异常，请稍后重试',
+    PROXY_REQUEST_FAILED: '代理服务暂时不可用，请稍后重试',
+    NETWORK_ERROR: '网络连接异常，请检查网络后重试',
+    REQUEST_TIMEOUT: '请求超时，请稍后重试',
+};
+
+function isStandardizedApiError(value: unknown): value is StandardizedApiError {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const error = value as Partial<StandardizedApiError>;
+    return typeof error.code === 'string' && typeof error.userMessage === 'string';
+}
+
+function resolveUserMessage(code?: string, status?: number, fallback?: string): string {
+    if (code && ERROR_CODE_USER_MESSAGES[code]) {
+        return ERROR_CODE_USER_MESSAGES[code];
+    }
+
+    if (typeof status === 'number' && STATUS_USER_MESSAGES[status]) {
+        return STATUS_USER_MESSAGES[status];
+    }
+
+    return fallback || '操作失败，请稍后重试';
+}
+
+export function createStandardizedApiError(
+    code: string,
+    message: string,
+    status?: number,
+    type: MusicErrorType = MusicErrorType.API
+): StandardizedApiError {
+    return {
+        code,
+        message,
+        status,
+        type,
+        userMessage: resolveUserMessage(code, status, message),
+        retryable: status === 429 || (typeof status === 'number' && status >= 500),
+    };
+}
+
+export async function parseErrorResponse(response: Response): Promise<StandardizedApiError> {
+    const contentType = response.headers.get('content-type') || '';
+    let payload: unknown = null;
+
+    try {
+        if (contentType.includes('application/json')) {
+            payload = await response.json();
+        } else {
+            const text = await response.text();
+            payload = text ? { error: { message: text } } : null;
+        }
+    } catch {
+        payload = null;
+    }
+
+    const errorRecord =
+        payload && typeof payload === 'object' && 'error' in payload
+            ? (payload as { error?: { code?: string; message?: string; status?: number } }).error
+            : undefined;
+
+    const status = errorRecord?.status ?? response.status;
+    const code = errorRecord?.code ?? `HTTP_${status}`;
+    const message = errorRecord?.message ?? `请求失败 (${status})`;
+
+    return createStandardizedApiError(code, message, status);
+}
+
+export function normalizeUnknownError(
+    error: unknown,
+    fallbackMessage: string = '操作失败，请稍后重试'
+): StandardizedApiError {
+    if (error instanceof MusicError) {
+        return {
+            code: error.type,
+            message: error.message,
+            status: undefined,
+            type: error.type,
+            userMessage: error.userMessage,
+            retryable: error.type === MusicErrorType.NETWORK,
+        };
+    }
+
+    if (isStandardizedApiError(error)) {
+        return error;
+    }
+
+    if (error instanceof DOMException && error.name === 'AbortError') {
+        return createStandardizedApiError(
+            'REQUEST_TIMEOUT',
+            'Request aborted',
+            504,
+            MusicErrorType.NETWORK
+        );
+    }
+
+    if (error instanceof Error) {
+        return createStandardizedApiError(
+            'NETWORK_ERROR',
+            error.message,
+            undefined,
+            MusicErrorType.NETWORK
+        );
+    }
+
+    if (typeof error === 'string' && error.trim()) {
+        return createStandardizedApiError('UNKNOWN_ERROR', error, undefined, MusicErrorType.UNKNOWN);
+    }
+
+    return createStandardizedApiError(
+        'UNKNOWN_ERROR',
+        fallbackMessage,
+        undefined,
+        MusicErrorType.UNKNOWN
+    );
+}
+
+export function toMusicError(error: StandardizedApiError, cause?: Error): MusicError {
+    return new MusicError(error.type, `[${error.code}] ${error.message}`, error.userMessage, cause);
+}
+
+export function getUserFacingErrorMessage(
+    error: unknown,
+    fallbackMessage: string = '操作失败，请稍后重试'
+): string {
+    return normalizeUnknownError(error, fallbackMessage).userMessage;
+}
 
 /**
  * 计算两个字符串的相似度 (综合算法)

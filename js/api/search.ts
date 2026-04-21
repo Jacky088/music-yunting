@@ -29,6 +29,7 @@ import {
     RadioCategory,
     RadioCateListResponse,
     RadioRecommendResponse,
+    MetingSong,
     UserPlaylist,
     UserPlaylistResponse,
     RadioDetailResponse
@@ -107,7 +108,7 @@ export async function searchMusicAPI(keyword: string, source: string = 'netease'
                     return detailData.songs.map(convertNeteaseDetailToSong);
                 }
             }
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     }
 
     return [];
@@ -152,10 +153,11 @@ export async function parsePlaylistAPI(playlistUrlOrId: string): Promise<Playlis
 
     try {
         const res = await fetchWithRetry(`${getMetingApiUrl()}/?type=playlist&id=${id}`);
-        const data = await res.json();
+        const data: unknown = await res.json();
         if (Array.isArray(data)) {
+            const songs = data as MetingSong[];
             return {
-                songs: data.map((s: any) => ({
+                songs: songs.map((s) => ({
                     id: s.id,
                     name: s.name,
                     artist: Array.isArray(s.artist) ? s.artist : [s.artist],

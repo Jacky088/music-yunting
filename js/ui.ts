@@ -1,4 +1,5 @@
 import * as api from './api';
+import { getUserFacingErrorMessage } from './api/utils';
 import {
     Song,
     LyricLine,
@@ -11,9 +12,29 @@ import {
     RadioProgram,
     FeedbackRenderOptions,
 } from './types';
-import * as player from './player';
 import { escapeHtml, formatTime, getElement, ensureHttps } from './utils';
 import { APP_CONFIG, logger } from './config';
+
+// NOTE: 延迟导入 player 模块以避免循环依赖
+// ui.ts → player.ts → control.ts/events.ts → ui.ts
+// 通过 loadPlayer() 在初始化时预填充缓存，之后 playerSync() 可安全同步调用
+let _player: typeof import('./player') | null = null;
+async function loadPlayer(): Promise<typeof import('./player')> {
+    if (!_player) _player = await import('./player');
+    return _player;
+}
+function playerSync(): typeof import('./player') {
+    if (!_player) {
+        // NOTE: 回退：如果 loadPlayer() 尚未调用，同步 import 并缓存
+        // 这种情况仅在测试或异常初始化顺序下发生
+        throw new Error('player module not loaded - call loadPlayer() first or use setPlayerModule()');
+    }
+    return _player;
+}
+export function setPlayerModule(mod: typeof import('./player')): void {
+    _player = mod;
+}
+export { loadPlayer };
 
 // --- DOM Element Cache ---
 
@@ -132,7 +153,7 @@ function renderSongItems(songs: Song[], startIndex: number, container: HTMLEleme
         songItem.className = 'song-item';
         songItem.dataset.index = index.toString(); // 用于查找
 
-        const isFavorite = player.isSongInFavorites(song);
+        const isFavorite = playerSync().isSongInFavorites(song);
         const favoriteIconClass = isFavorite ? 'fas fa-heart' : 'far fa-heart';
         const favoriteStyle = isFavorite ? 'color: #ff6b6b;' : '';
         const artistText = Array.isArray(song.artist) ? song.artist.join(' / ') : song.artist;
@@ -155,7 +176,7 @@ function renderSongItems(songs: Song[], startIndex: number, container: HTMLEleme
 
         // 点击歌曲播放
         songItem.onclick = () => {
-            player.playSong(
+            playerSync().playSong(
                 index,
                 playlistForPlayback,
                 currentScrollState ? currentScrollState.containerId : 'searchResults'
@@ -166,11 +187,11 @@ function renderSongItems(songs: Song[], startIndex: number, container: HTMLEleme
         if (favoriteBtn) {
             favoriteBtn.addEventListener('click', e => {
                 e.stopPropagation();
-                player.toggleFavoriteButton(song);
+                playerSync().toggleFavoriteButton(song);
                 // 乐观更新 UI
                 const icon = favoriteBtn.querySelector('i');
                 if (icon) {
-                    if (player.isSongInFavorites(song)) {
+                    if (playerSync().isSongInFavorites(song)) {
                         icon.className = 'fas fa-heart';
                         (icon as HTMLElement).style.color = '#ff6b6b';
                     } else {
@@ -179,13 +200,13 @@ function renderSongItems(songs: Song[], startIndex: number, container: HTMLEleme
                     }
                 }
 
-                const currentSong = player.getCurrentSong();
+                const currentSong = playerSync().getCurrentSong();
                 if (
                     currentSong &&
                     currentSong.id === song.id &&
                     (currentSong.source || 'netease') === (song.source || 'netease')
                 ) {
-                    player.updatePlayerFavoriteButton(player.isSongInFavorites(song));
+                    playerSync().updatePlayerFavoriteButton(playerSync().isSongInFavorites(song));
                 }
 
                 dispatchUiSyncEvent('music888:favorites-updated');
@@ -223,7 +244,7 @@ function renderSongItems(songs: Song[], startIndex: number, container: HTMLEleme
                     }
                 } catch (error) {
                     logger.error('下载失败:', error);
-                    showNotification('下载出错，请重试', 'error');
+                    showNotification(getUserFacingErrorMessage(error, '下载失败，请稍后重试'), 'error');
                 } finally {
                     btn.disabled = false;
                     btn.classList.remove('loading');
@@ -277,12 +298,17 @@ export function displaySearchResults(songs: Song[], containerId: string, playlis
     const container = getElement(`#${containerId}`);
     if (!container) return;
 
-    container.innerHTML = '';
-
-    // 清除之前的滚动状态（如果是同一个容器）
-    if (currentScrollState && currentScrollState.containerId === containerId) {
+    // 清除之前的滚动监听器和状态
+    if (currentScrollHandler && currentScrollContainer) {
+        currentScrollContainer.removeEventListener('scroll', currentScrollHandler);
+        currentScrollHandler = null;
+        currentScrollContainer = null;
+    }
+    if (currentScrollState) {
         currentScrollState = null;
     }
+
+    container.innerHTML = '';
 
     if (songs.length === 0) {
         showEmptyState(containerId, '未找到相关歌曲', 'fas fa-search');
@@ -300,7 +326,7 @@ export function displaySearchResults(songs: Song[], containerId: string, playlis
     const playAllBtn = actionBar.querySelector('.batch-play-all-btn');
     if (playAllBtn) {
         playAllBtn.addEventListener('click', () => {
-            player.playSong(0, playlistForPlayback, containerId);
+            playerSync().playSong(0, playlistForPlayback, containerId);
         });
     }
 
@@ -435,7 +461,7 @@ export function updateCurrentSongInfo(song: Song, coverUrl: string): void {
  * @param duration 总时长（秒）
  */
 export function updateProgress(currentTime: number, duration: number): void {
-    const progressPercent = (currentTime / duration) * 100;
+    const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
     if (DOM.progressFill) {
         DOM.progressFill.style.width = `${progressPercent}%`;
     }
@@ -594,10 +620,12 @@ export function showLoading(containerId: string = 'searchResults'): void {
 
 /**
  * 显示错误信息
- * @param message 错误消息
+ * @param error 错误消息或异常对象
  * @param containerId 容器元素 ID
  */
-export function showError(message: string, containerId: string = 'searchResults'): void {
+export function showError(error: unknown, containerId: string = 'searchResults'): void {
+    const message = getUserFacingErrorMessage(error, '操作失败，请稍后重试');
+
     renderFeedbackState(containerId, {
         state: 'error',
         message,
@@ -795,7 +823,11 @@ export function displayRadioList(
  * @param containerId 容器元素 ID
  * @param onPlay 点击播放回调
  */
-export function displayRadioPrograms(programs: RadioProgram[], containerId: string, onPlay: (program: RadioProgram) => void): void {
+export function displayRadioPrograms(
+    programs: RadioProgram[],
+    containerId: string,
+    onPlay: (program: RadioProgram) => void
+): void {
     const container = getElement(`#${containerId}`);
     if (!container) return;
 

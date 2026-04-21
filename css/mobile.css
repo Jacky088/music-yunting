@@ -283,6 +283,18 @@
     }
 
     /* === 歌手标签移动端 === */
+    .section-shell-title {
+        font-size: 16px;
+    }
+
+    .section-shell-kicker {
+        font-size: 10px;
+    }
+
+    .section-shell-subtitle {
+        font-size: 11px;
+    }
+
     .artist-grid {
         grid-template-columns: repeat(3, 1fr);
         gap: 10px;

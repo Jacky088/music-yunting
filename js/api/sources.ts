@@ -99,15 +99,18 @@ export async function testAPI(api: ApiSource): Promise<boolean> {
     try {
         const response = await fetchWithRetry(testUrl, {}, 0);
         const text = await response.text();
-        const data: any = JSON.parse(text);
+        const data: unknown = JSON.parse(text);
 
         if (api.type === 'nec') {
-            return data.code === 200 || data.result?.code === 200;
+            const necData = data as { code?: number, result?: { code?: number } };
+            return necData.code === 200 || necData.result?.code === 200;
         }
         if (api.type === 'gdstudio') {
-            return (Array.isArray(data) && data.length > 0) || (typeof data === 'object' && data !== null && (Object.keys(data).length > 0 || data.url));
+            const objectData = typeof data === 'object' && data !== null ? data as Record<string, unknown> : null;
+            return (Array.isArray(data) && data.length > 0) || (objectData !== null && (Object.keys(objectData).length > 0 || 'url' in objectData));
         }
-        return (Array.isArray(data) && data.length > 0) || (typeof data === 'object' && data !== null && !data.error);
+        const objectData = typeof data === 'object' && data !== null ? data as Record<string, unknown> : null;
+        return (Array.isArray(data) && data.length > 0) || (objectData !== null && !objectData.error);
     } catch {
         return false;
     }

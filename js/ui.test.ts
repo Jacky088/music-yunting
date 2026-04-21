@@ -4,14 +4,16 @@
 import { Song } from './types';
 
 // Mock player 模块
-vi.mock('./player', () => ({
+const playerMock = {
     isSongInFavorites: vi.fn(() => false),
     toggleFavoriteButton: vi.fn(),
     playSong: vi.fn(),
     updatePlayerFavoriteButton: vi.fn(),
     getCurrentSong: vi.fn(() => null),
     getFavorites: vi.fn(() => []),
-}));
+};
+
+vi.mock('./player', () => playerMock);
 
 // Mock api 模块
 vi.mock('./api', () => ({
@@ -19,9 +21,12 @@ vi.mock('./api', () => ({
 }));
 
 describe('UI Helper Functions', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
         // 清理 DOM
         document.body.innerHTML = '';
+        // NOTE: 预填充 player 模块缓存，避免 playerSync() 报错
+        const { setPlayerModule } = await import('./ui');
+        setPlayerModule(playerMock as any);
     });
 
     describe('showNotification', () => {
@@ -277,8 +282,9 @@ describe('UI Helper Functions', () => {
 
         it('应渲染统一空状态', async () => {
             const uiModule = await import('./ui');
-            const showEmptyState = (uiModule as { showEmptyState?: (containerId: string, message: string, iconClass?: string) => void })
-                .showEmptyState;
+            const showEmptyState = (
+                uiModule as { showEmptyState?: (containerId: string, message: string, iconClass?: string) => void }
+            ).showEmptyState;
 
             expect(showEmptyState).toBeTypeOf('function');
 
@@ -330,17 +336,11 @@ describe('UI Helper Functions', () => {
                 '输入歌单ID或链接...'
             );
             expect(document.querySelector('#playlistActionBtn span')?.textContent).toBe('解析');
-            expect(document.querySelector('#playlistActionBtn i')?.className).toBe(
-                'fas fa-cloud-download-alt'
+            expect(document.querySelector('#playlistActionBtn i')?.className).toBe('fas fa-cloud-download-alt');
+            expect(document.getElementById('playlistActionFeedback')?.getAttribute('data-playlist-feedback-type')).toBe(
+                'info'
             );
-            expect(
-                document
-                    .getElementById('playlistActionFeedback')
-                    ?.getAttribute('data-playlist-feedback-type')
-            ).toBe('info');
-            expect(document.getElementById('playlistActionFeedback')?.textContent).toContain(
-                '准备解析歌单'
-            );
+            expect(document.getElementById('playlistActionFeedback')?.textContent).toContain('准备解析歌单');
         });
 
         it('提交中时应禁用输入与按钮并暴露忙碌状态', async () => {

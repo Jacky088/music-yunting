@@ -5,6 +5,7 @@
 
 import { MusicError, MusicErrorType } from '../types';
 import { logger } from '../config';
+import { normalizeUnknownError, parseErrorResponse, toMusicError } from './utils';
 
 /** 代理端点路径 */
 export const PROXY_ENDPOINT = '/api/proxy';
@@ -16,6 +17,49 @@ export const PROXY_ENDPOINT = '/api/proxy';
  */
 export function toProxyUrl(url: string): string {
     return `${PROXY_ENDPOINT}?url=${encodeURIComponent(url)}`;
+}
+
+/**
+ * 将媒体资源 URL 统一转换为可播放/可下载的代理地址
+ * - data/blob URL 原样返回
+ * - 已经是代理地址时直接返回，避免重复编码
+ * - 协议相对地址和 http 地址统一提升为 https，避免混合内容导致播放失败
+ * - 其他外部 http(s) 资源统一通过代理访问
+ */
+export function toPlayableMediaUrl(url: string): string {
+    if (!url) return '';
+
+    if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith(`${PROXY_ENDPOINT}?`)) {
+        return url;
+    }
+
+    if (url.startsWith('//')) {
+        return toProxyUrl(`https:${url}`);
+    }
+
+    try {
+        const parsed = new URL(url);
+
+        if (parsed.protocol === 'data:' || parsed.protocol === 'blob:') {
+            return url;
+        }
+
+        if (parsed.pathname === PROXY_ENDPOINT) {
+            return url;
+        }
+
+        if (parsed.protocol === 'http:') {
+            parsed.protocol = 'https:';
+        }
+
+        if (parsed.protocol === 'https:') {
+            return toProxyUrl(parsed.toString());
+        }
+
+        return url;
+    } catch {
+        return url;
+    }
 }
 
 /**
@@ -34,10 +78,10 @@ export async function fetchWithRetry(
     const requestUrl = useProxy ? toProxyUrl(url) : url;
 
     for (let i = 0; i <= retries; i++) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 20000);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
 
+        try {
             // 附加 Turnstile token（仅代理请求，一次性使用后清除）
             const requestOptions: RequestInit = { ...options, signal: controller.signal };
             if (useProxy) {
@@ -61,11 +105,8 @@ export async function fetchWithRetry(
             if (response.ok) {
                 return response;
             } else {
-                throw new MusicError(
-                    MusicErrorType.API,
-                    `API returned error: ${response.status}`,
-                    `服务器返回错误 (${response.status})`
-                );
+                const parsedError = await parseErrorResponse(response);
+                throw toMusicError(parsedError);
             }
         } catch (error) {
             logger.error(`Request failed (attempt ${i + 1}/${retries + 1}):`, error);
@@ -73,13 +114,17 @@ export async function fetchWithRetry(
                 if (error instanceof MusicError) {
                     throw error;
                 }
-                throw new MusicError(
-                    MusicErrorType.NETWORK,
-                    `All fetch attempts failed: ${error}`,
-                    '网络请求失败，请检查网络连接',
+                const normalizedError = normalizeUnknownError(
+                    error,
+                    '网络请求失败，请检查网络连接'
+                );
+                throw toMusicError(
+                    normalizedError,
                     error instanceof Error ? error : undefined
                 );
             }
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
     throw new MusicError(MusicErrorType.NETWORK, 'All fetch attempts failed.', '网络请求失败，请稍后重试');

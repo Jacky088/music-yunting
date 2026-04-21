@@ -83,7 +83,7 @@ export async function getAlbumCoverUrl(song: Song, size: number = 300): Promise<
         const response = await fetchWithRetry(`${gdstudioUrl}?types=pic&source=${song.source || 'netease'}&id=${song.pic_id}&size=300`);
         const data: GDStudioPicResponse = await response.json();
         if (data?.url) return data.url;
-    } catch (e) {
+    } catch {
         logger.warn('GDStudio 获取封面失败');
     }
 
@@ -92,7 +92,7 @@ export async function getAlbumCoverUrl(song: Song, size: number = 300): Promise<
         const response = await fetchWithRetry(`${metingUrl}/?type=pic&id=${song.pic_id}`);
         const data = await response.json();
         if (data?.url || data?.pic) return data.url || data.pic || '';
-    } catch (e) {
+    } catch {
         logger.warn('Meting 获取封面失败');
     }
     return '';
@@ -129,7 +129,7 @@ async function searchSingleSource(source: string, songName: string, artistName: 
         const keyword = `${songName} ${artistName}`;
         const response = await fetchWithRetry(`${getGDStudioApiUrl()}?types=search&source=${source}&name=${encodeURIComponent(keyword)}&count=5`, {}, 0);
         const data = await response.json();
-        let songs: GDStudioSong[] = Array.isArray(data) ? data : Object.values(data || {});
+        const songs: GDStudioSong[] = Array.isArray(data) ? data : Object.values(data || {});
 
         const bestMatch = songs
             .map(s => ({ s, score: calculateSongMatchScore(songName, artistName, s.name, s.artist) }))
@@ -143,7 +143,7 @@ async function searchSingleSource(source: string, songName: string, artistName: 
                 if (res && res.url && !isProbablyPreview(res.url, res.size)) return { ...res, source };
             }
         }
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
     return null;
 }
 
@@ -193,7 +193,7 @@ export async function tryGetFullVersionFromNeteaseUnblock(song: Song, quality: s
                         size: data.data[0].size,
                     };
                 }
-            } catch (e) { /* ignore */ }
+            } catch { /* ignore */ }
         }
     }
     return null;
@@ -202,7 +202,7 @@ export async function tryGetFullVersionFromNeteaseUnblock(song: Song, quality: s
 /**
  * 尝试获取完整版本
  */
-export async function tryGetFullVersionFromOtherSources(song: Song, quality: string): Promise<SongUrlResult | null> {
+export async function tryGetFullVersionFromOtherSources(song: Song, _quality: string): Promise<SongUrlResult | null> {
     const key = `${song.id}_${song.source}`;
     if (crossSourceSearchInProgress.has(key)) return null;
     crossSourceSearchInProgress.add(key);
@@ -234,7 +234,7 @@ export async function getSongUrl(song: Song, quality: string): Promise<SongUrlRe
                 candidates.push(res);
                 if (PREVIEW_DETECTION.PROACTIVE_CHECK) crossSourcePromise = searchSongFromOtherSources(song.name, artist, source);
             }
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     }
 
     // 2. 尝试 GDStudio
@@ -248,7 +248,7 @@ export async function getSongUrl(song: Song, quality: string): Promise<SongUrlRe
                     crossSourcePromise = searchSongFromOtherSources(song.name, artist, source);
                 }
             }
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     }
 
     // 3. 回退逻辑
@@ -273,7 +273,7 @@ export async function getLyrics(song: Song): Promise<LyricResult> {
             const res = await fetchWithRetry(`${getNecApiUrl()}/lyric?id=${song.id}`);
             const data: NeteaseLyricResponse = await res.json();
             if (data.code === 200 && data.lrc?.lyric) return { lyric: data.lrc.lyric, tlyric: data.tlyric?.lyric };
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     }
 
     // 回退 GDStudio
@@ -282,7 +282,7 @@ export async function getLyrics(song: Song): Promise<LyricResult> {
             const res = await fetchWithRetry(`${getGDStudioApiUrl()}?types=lyric&source=${source}&id=${song.lyric_id || song.id}`);
             const data: GDStudioLyricResponse = await res.json();
             if (data?.lyric) return { lyric: data.lyric, tlyric: data.tlyric };
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     }
 
     return { lyric: '' };

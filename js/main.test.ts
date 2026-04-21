@@ -8,15 +8,19 @@ vi.mock('./api', () => ({
     findWorkingAPI: vi.fn(() => Promise.resolve({ success: false })),
 }));
 
-vi.mock('./ui', () => ({
-    init: vi.fn(),
-    showNotification: vi.fn(),
-    showLoading: vi.fn(),
-    showError: vi.fn(),
-    showEmptyState: vi.fn(),
-    displaySearchResults: vi.fn(),
-    displayRadioPrograms: vi.fn(),
-}));
+vi.mock('./ui', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./ui')>();
+    return {
+        ...actual,
+        init: vi.fn(),
+        showNotification: vi.fn(),
+        showLoading: vi.fn(),
+        showError: vi.fn(),
+        showEmptyState: vi.fn(),
+        displaySearchResults: vi.fn(),
+        displayRadioPrograms: vi.fn(),
+    };
+});
 
 vi.mock('./player', () => ({
     initPlayer: vi.fn(),
@@ -73,6 +77,7 @@ function createAppShell(): void {
         </select>
         <input id="playlistActionInput" />
         <button id="playlistActionBtn"><i></i><span>加载</span></button>
+        <div id="playlistActionFeedback"></div>
         <div id="artistGrid" style="display:none"></div>
         <div id="artistFilter" style="display:none"></div>
         <div id="artistDetailView"></div>

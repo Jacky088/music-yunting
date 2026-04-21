@@ -11,6 +11,13 @@ let isFading = false;
 let savedVolume = loadSavedVolume();
 
 /**
+ * 创建一个延迟 Promise
+ */
+function delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * 从 localStorage 加载保存的音量
  */
 export function loadSavedVolume(): number {
@@ -76,7 +83,7 @@ export async function fadeOut(audio: HTMLAudioElement): Promise<void> {
 
     for (let i = APP_CONFIG.FADE_STEPS; i >= 0; i--) {
         audio.volume = Math.max(0, volumeStep * i);
-        await new Promise(r => setTimeout(r, stepTime));
+        await delay(stepTime);
     }
     audio.pause();
     isFading = false;
@@ -98,7 +105,7 @@ export async function fadeIn(audio: HTMLAudioElement): Promise<void> {
 
     for (let i = 0; i <= APP_CONFIG.FADE_STEPS; i++) {
         audio.volume = Math.min(targetVolume, volumeStep * i);
-        await new Promise(r => setTimeout(r, stepTime));
+        await delay(stepTime);
     }
     isFading = false;
 }

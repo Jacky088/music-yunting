@@ -23,7 +23,7 @@ import {
 import { fadeIn, fadeOut, persistVolume, setSavedVolume } from './effects';
 import { addToHistory } from './playlist';
 import { parseLyrics } from './lyrics';
-import { updateMediaSession } from './events';
+import { updateMediaSession, resetPreviewDetection } from './events';
 
 /**
  * 播放指定索引的歌曲
@@ -38,6 +38,9 @@ export async function playSong(
 
     const requestId = incrementRequestId();
     const song = playlist[index];
+
+    // 重置试听检测状态
+    resetPreviewDetection();
 
     // UI 反馈
     ui.showNotification(`正在尝试播放: ${song.name}`, 'info');
@@ -83,10 +86,10 @@ export async function playSong(
         }
 
         // 4. 加载辅助资源（异步）
-        loadExtraResources(song);
+        loadExtraResources(song, requestId);
 
     } catch (e) {
-        const errorName = (e && typeof e === 'object' && 'name' in e) ? (e as any).name : 'UnknownError';
+        const errorName = (e && typeof e === 'object' && 'name' in e) ? (e as { name: string }).name : 'UnknownError';
         if (errorName === 'AbortError') {
             logger.debug('播放被中止 (AbortError):', e);
         } else {
@@ -99,15 +102,17 @@ export async function playSong(
 /**
  * 加载封面和歌词
  */
-async function loadExtraResources(song: Song): Promise<void> {
+async function loadExtraResources(song: Song, requestId: number): Promise<void> {
     try {
-        // 获取封面
         const cover = await api.getAlbumCoverUrl(song);
+        if (requestId !== currentPlayRequestId) return;
+
         ui.updateCurrentSongInfo(song, cover);
         updateMediaSession(song, cover);
 
-        // 获取歌词
         const lyricsRes = await api.getLyrics(song);
+        if (requestId !== currentPlayRequestId) return;
+
         const parsedLyrics = parseLyrics(lyricsRes.lyric, lyricsRes.tlyric);
         setCurrentLyrics(parsedLyrics);
 

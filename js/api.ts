@@ -10,6 +10,7 @@ export type { Song } from './types';
 export {
     PROXY_ENDPOINT,
     toProxyUrl,
+    toPlayableMediaUrl,
     fetchWithRetry
 } from './api/client';
 

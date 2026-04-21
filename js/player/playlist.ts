@@ -143,7 +143,10 @@ export function loadPlayHistoryFromStorage(): void {
     try {
         const saved = localStorage.getItem('music888_history');
         if (saved) {
-            playHistory = JSON.parse(saved);
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+                playHistory = parsed;
+            }
         }
     } catch (e) {
         logger.debug('加载历史失败', e);

@@ -272,12 +272,7 @@ function resetArtistDetailView(): void {
     if (detailDesc) {
         detailDesc.innerHTML = '';
     }
-    ui.showEmptyState(
-        'artistAlbumGrid',
-        '选择歌手后查看专辑',
-        'fas fa-compact-disc',
-        '歌手详情会在这里更新'
-    );
+    ui.showEmptyState('artistAlbumGrid', '选择歌手后查看专辑', 'fas fa-compact-disc', '歌手详情会在这里更新');
 }
 
 function resetRadioProgramsView(): void {
@@ -285,12 +280,7 @@ function resetRadioProgramsView(): void {
     if (radioHeader) {
         radioHeader.innerHTML = '';
     }
-    ui.showEmptyState(
-        'radioProgramResults',
-        '选择电台后查看节目',
-        'fas fa-podcast',
-        '点击节目即可直接播放'
-    );
+    ui.showEmptyState('radioProgramResults', '选择电台后查看节目', 'fas fa-podcast', '点击节目即可直接播放');
 }
 
 /**
@@ -298,6 +288,9 @@ function resetRadioProgramsView(): void {
  */
 async function initializeApp(): Promise<void> {
     logger.info('沄听 App 初始化...');
+
+    // NOTE: 预填充 player 模块缓存，打破 ui.ts ↔ player.ts 循环依赖
+    ui.setPlayerModule(player);
 
     // NOTE: Turnstile 安全验证（首次访问）
     try {
@@ -565,7 +558,9 @@ function bindEventListeners(): void {
     // 歌手首字母筛选按钮
     document.querySelectorAll('#artistInitialFilter .filter-btn').forEach(button => {
         button.addEventListener('click', () => {
-            document.querySelectorAll('#artistInitialFilter .filter-btn').forEach(btn => btn.classList.remove('active'));
+            document
+                .querySelectorAll('#artistInitialFilter .filter-btn')
+                .forEach(btn => btn.classList.remove('active'));
             button.classList.add('active');
             const initial = (button as HTMLElement).dataset.initial || '-1';
             handleLoadArtists(artistCurrentArea, artistCurrentType, initial === '-1' ? -1 : initial);
@@ -838,7 +833,12 @@ function switchMyTab(tabName: MyTabName): void {
 /**
  * 加载歌手列表
  */
-async function handleLoadArtists(area: number, type: number = -1, initial: string | number = -1, append: boolean = false): Promise<void> {
+async function handleLoadArtists(
+    area: number,
+    type: number = -1,
+    initial: string | number = -1,
+    append: boolean = false
+): Promise<void> {
     const artistGrid = getElement('#artistGrid');
     const requestId = ++artistListRequestId;
 
@@ -872,7 +872,7 @@ async function handleLoadArtists(area: number, type: number = -1, initial: strin
         ui.displayArtistGrid(result.artists, 'artistGrid', handleArtistClick, {
             append,
             hasMore: artistHasMore,
-            onLoadMore: () => handleLoadArtists(artistCurrentArea, artistCurrentType, artistCurrentInitial, true)
+            onLoadMore: () => handleLoadArtists(artistCurrentArea, artistCurrentType, artistCurrentInitial, true),
         });
     } catch (error) {
         logger.error('Load artists failed:', error);
@@ -968,7 +968,7 @@ async function handleArtistClick(artist: ArtistInfo): Promise<void> {
     ui.displayAlbumGrid(albumsResult.albums, 'artistAlbumGrid', handleAlbumClick, {
         append: false,
         hasMore: artistAlbumsHasMore,
-        onLoadMore: () => loadMoreArtistAlbums()
+        onLoadMore: () => loadMoreArtistAlbums(),
     });
 }
 
@@ -985,7 +985,7 @@ async function loadMoreArtistAlbums(): Promise<void> {
         ui.displayAlbumGrid(result.albums, 'artistAlbumGrid', handleAlbumClick, {
             append: true,
             hasMore: artistAlbumsHasMore,
-            onLoadMore: () => loadMoreArtistAlbums()
+            onLoadMore: () => loadMoreArtistAlbums(),
         });
     } catch (error) {
         logger.error('Load more artist albums failed:', error);
@@ -1092,7 +1092,7 @@ async function handleLoadRadio(append: boolean = false): Promise<void> {
     showRadioListView();
 
     try {
-        let result: { radios: RadioStation[], hasMore: boolean };
+        let result: { radios: RadioStation[]; hasMore: boolean };
         if (radioCurrentCateId === 0) {
             result = await api.getHotRadio(60, radioOffset);
         } else {
@@ -1103,7 +1103,7 @@ async function handleLoadRadio(append: boolean = false): Promise<void> {
         ui.displayRadioList(result.radios, 'radioList', handleRadioClick, {
             append,
             hasMore: radioHasMore,
-            onLoadMore: () => handleLoadRadio(true)
+            onLoadMore: () => handleLoadRadio(true),
         });
     } catch (error) {
         logger.error('Load radio failed:', error);
@@ -1227,7 +1227,11 @@ async function handleLoadUserPlaylists(): Promise<void> {
     }
 
     // 持久化用户ID
-    localStorage.setItem('music888_userId', uid);
+    try {
+        localStorage.setItem('music888_userId', uid);
+    } catch {
+        /* localStorage 不可用（隐私模式等） */
+    }
 
     const container = getElement('#userPlaylistsContainer');
     const listEl = getElement('#userPlaylistsList');
@@ -1385,10 +1389,13 @@ function loadSavedRadios(): RadioStation[] {
  */
 function saveRadioToStorage(radio: RadioStation): void {
     const radios = loadSavedRadios();
-    // 去重
     if (!radios.some(r => r.id === radio.id)) {
         radios.push(radio);
-        localStorage.setItem('music888_savedRadios', JSON.stringify(radios));
+        try {
+            localStorage.setItem('music888_savedRadios', JSON.stringify(radios));
+        } catch {
+            /* localStorage 不可用 */
+        }
     }
 }
 
@@ -1440,7 +1447,7 @@ function renderUserPlaylistList(playlists: UserPlaylist[], radios: RadioStation[
             </button>
         `;
         item.querySelector('.playlist-item-info')?.addEventListener('click', () => handleRadioItemClick(radio));
-        item.querySelector('.playlist-action-btn.delete')?.addEventListener('click', (e) => {
+        item.querySelector('.playlist-action-btn.delete')?.addEventListener('click', e => {
             e.stopPropagation();
             removeRadioFromStorage(radio.id);
             item.remove();
@@ -1457,7 +1464,11 @@ function renderUserPlaylistList(playlists: UserPlaylist[], radios: RadioStation[
  */
 function removeRadioFromStorage(radioId: number): void {
     const radios = loadSavedRadios().filter(r => r.id !== radioId);
-    localStorage.setItem('music888_savedRadios', JSON.stringify(radios));
+    try {
+        localStorage.setItem('music888_savedRadios', JSON.stringify(radios));
+    } catch {
+        /* localStorage 不可用 */
+    }
 }
 
 /**
@@ -1621,7 +1632,7 @@ function handleSwipe(): void {
  * 显示 Turnstile 验证挑战
  */
 function showTurnstileChallenge(siteKey: string): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
         const modal = getElement('#turnstileModal');
         const widgetContainer = getElement('#turnstileWidget');
         if (!modal || !widgetContainer) {
@@ -1648,7 +1659,7 @@ function showTurnstileChallenge(siteKey: string): Promise<void> {
                         logger.error('Turnstile verification failed, proceeding anyway');
                         (modal as HTMLElement).style.display = 'none';
                         resolve();
-                    }
+                    },
                 });
             } else {
                 setTimeout(tryRender, 200);
@@ -1672,7 +1683,11 @@ function showOnboardingIfNeeded(): void {
     const dismissBtn = getElement('#onboardingDismissBtn');
 
     const dismiss = () => {
-        localStorage.setItem('music888_onboarded', '1');
+        try {
+            localStorage.setItem('music888_onboarded', '1');
+        } catch {
+            /* ignore */
+        }
         (modal as HTMLElement).style.display = 'none';
     };
 
@@ -1681,7 +1696,7 @@ function showOnboardingIfNeeded(): void {
     }
 
     // 点击遮罩也可关闭
-    modal.addEventListener('click', (e) => {
+    modal.addEventListener('click', e => {
         if (e.target === modal) dismiss();
     });
 }

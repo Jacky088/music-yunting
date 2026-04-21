@@ -42,7 +42,7 @@ export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
     };
 
     const lines = lrc.split('\n');
-    let lyricData: LyricLine[] = [];
+    const lyricData: LyricLine[] = [];
 
     lines.forEach(line => {
         const parsed = parseLine(line);

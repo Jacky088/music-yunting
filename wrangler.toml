@@ -6,5 +6,6 @@ compatibility_date = "2024-04-03"
 # 建议在 Cloudflare 控制台 Web 界面配置这些敏感变量
 # NETEASE_VIP_COOKIE = ""
 # EXTRA_ALLOWED_HOSTS = ""
+# EXTRA_ALLOWED_ORIGINS = ""
 
 # 自定义域名 (music.weny888.com) 请在 Cloudflare Pages Dashboard 中配置

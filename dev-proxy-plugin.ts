@@ -6,14 +6,18 @@
 
 import type { Plugin } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'http';
+import http from 'node:http';
+import https from 'node:https';
+import { URL } from 'node:url';
 
-// NOTE: API 源白名单，参考 api/proxy.js
 const ALLOWED_HOSTS = [
     'music-api.gdstudio.xyz',
     'api.injahow.cn',
+    'api.i-meto.com',
     'meting.qjqq.cn',
     'w7z.indevs.in',
     'netease-cloud-music-api-psi-three.vercel.app',
+    'netease-cloud-music-api-five-roan.vercel.app',
     'y.qq.com',
     'music.163.com',
     'interface.music.163.com',
@@ -76,27 +80,161 @@ function getRefererForHost(hostname: string): string {
         return 'https://www.kuwo.cn/';
     } else if (hostname.includes('joox.com')) {
         return 'https://www.joox.com/';
+    } else if (hostname.includes('i-meto.com')) {
+        return 'https://api.i-meto.com/';
     } else if (hostname.includes('ximalaya.com') || hostname.includes('xmcdn.com')) {
         return 'https://www.ximalaya.com/';
     }
     return 'https://music.163.com/';
 }
 
-/**
- * 处理代理请求
- */
+function proxyFetch(targetUrl: string, headers: Record<string, string>, maxRedirects = 5): Promise<{ status: number; contentType: string; contentLength: string | null; body: Buffer }> {
+    return new Promise((resolve, reject) => {
+        if (maxRedirects <= 0) {
+            reject(new Error('Too many redirects'));
+            return;
+        }
+
+        const parsed = new URL(targetUrl);
+        const isSecure = parsed.protocol === 'https:';
+
+        const proxyUrl = isSecure
+            ? (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy)
+            : (process.env.HTTP_PROXY || process.env.http_proxy);
+
+        const requestHeaders = { ...headers };
+
+        const handleResponse = (res: http.IncomingMessage) => {
+            if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                try {
+                    const redirectUrl = new URL(res.headers.location, targetUrl).toString();
+                    res.resume();
+                    proxyFetch(redirectUrl, headers, maxRedirects - 1).then(resolve, reject);
+                    return;
+                } catch {
+                    res.resume();
+                    reject(new Error('Invalid redirect URL'));
+                    return;
+                }
+            }
+
+            const chunks: Buffer[] = [];
+            res.on('data', (chunk: Buffer) => chunks.push(chunk));
+            res.on('end', () => {
+                resolve({
+                    status: res.statusCode || 502,
+                    contentType: res.headers['content-type'] || 'application/octet-stream',
+                    contentLength: res.headers['content-length'] || null,
+                    body: Buffer.concat(chunks),
+                });
+            });
+            res.on('error', reject);
+        };
+
+        const applyTimeout = (req: http.ClientRequest) => {
+            req.setTimeout(UPSTREAM_TIMEOUT, () => {
+                req.destroy(new Error('Request timeout'));
+            });
+            req.on('error', reject);
+        };
+
+        if (proxyUrl) {
+            try {
+                const parsedProxy = new URL(proxyUrl);
+                const proxyIsSecure = parsedProxy.protocol === 'https:';
+                const proxyModule = proxyIsSecure ? https : http;
+                const proxyPort = parseInt(parsedProxy.port) || (proxyIsSecure ? 443 : 80);
+
+                if (isSecure) {
+                    const connectReq = proxyModule.request({
+                        host: parsedProxy.hostname,
+                        port: proxyPort,
+                        method: 'CONNECT',
+                        path: `${parsed.hostname}:${parsed.port || 443}`,
+                    });
+
+                    connectReq.setTimeout(UPSTREAM_TIMEOUT, () => {
+                        connectReq.destroy(new Error('Proxy connect timeout'));
+                    });
+
+                    connectReq.on('error', reject);
+
+                    connectReq.on('connect', (connectRes, socket) => {
+                        if (connectRes.statusCode !== 200) {
+                            socket.destroy();
+                            reject(new Error(`Proxy CONNECT failed: ${connectRes.statusCode}`));
+                            return;
+                        }
+
+                        const tlsReq = https.request({
+                            hostname: parsed.hostname,
+                            port: parsed.port || 443,
+                            path: parsed.pathname + parsed.search,
+                            method: 'GET',
+                            headers: {
+                                ...requestHeaders,
+                                Host: parsed.host,
+                            },
+                            socket,
+                            agent: false,
+                        }, handleResponse);
+
+                        tlsReq.setTimeout(UPSTREAM_TIMEOUT, () => {
+                            tlsReq.destroy(new Error('Request timeout'));
+                        });
+
+                        tlsReq.on('error', reject);
+                        tlsReq.end();
+                    });
+
+                    connectReq.end();
+                } else {
+                    const req = proxyModule.request({
+                        host: parsedProxy.hostname,
+                        port: proxyPort,
+                        path: targetUrl,
+                        method: 'GET',
+                        headers: {
+                            ...requestHeaders,
+                            Host: parsed.host,
+                        },
+                    }, handleResponse);
+
+                    applyTimeout(req);
+                    req.end();
+                }
+            } catch {
+                reject(new Error(`Invalid proxy URL: ${proxyUrl}`));
+                return;
+            }
+        } else {
+            const httpModule = isSecure ? https : http;
+            const req = httpModule.request({
+                hostname: parsed.hostname,
+                port: parsed.port || (isSecure ? 443 : 80),
+                path: parsed.pathname + parsed.search,
+                method: 'GET',
+                headers: requestHeaders,
+            }, handleResponse);
+
+            applyTimeout(req);
+            req.end();
+        }
+    });
+}
+
 async function handleProxyRequest(
-    req: IncomingMessage,
+    _req: IncomingMessage,
     res: ServerResponse,
     urlParam: string
 ): Promise<void> {
     const decodedUrl = decodeURIComponent(urlParam);
 
-    // 验证 URL 安全性
     if (!isUrlAllowed(decodedUrl)) {
         console.warn(`[dev-proxy] Blocked request to unauthorized URL: ${decodedUrl}`);
         res.statusCode = 403;
         res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
         res.end(JSON.stringify({ error: 'URL not allowed' }));
         return;
     }
@@ -105,78 +243,49 @@ async function handleProxyRequest(
         const parsedUrl = new URL(decodedUrl);
         const referer = getRefererForHost(parsedUrl.hostname);
 
-        // 使用 AbortController 实现超时
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT);
-
-        const response = await fetch(parsedUrl.toString(), {
-            headers: {
-                Referer: referer,
-                Origin: referer.replace(/\/$/, ''),
-                'User-Agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                Accept: 'application/json, text/plain, */*',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            },
-            signal: controller.signal,
+        const response = await proxyFetch(parsedUrl.toString(), {
+            Referer: referer,
+            Origin: referer.replace(/\/$/, ''),
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: 'application/json, text/plain, */*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         });
 
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
+        if (response.status >= 400) {
             console.error(`[dev-proxy] Upstream error: ${response.status} for ${decodedUrl.substring(0, 100)}`);
             res.statusCode = response.status;
             res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
             res.end(JSON.stringify({ error: `Upstream API responded with status: ${response.status}` }));
             return;
         }
 
-        // 设置 CORS 头
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.setHeader('Content-Type', response.contentType);
 
-        // 复制响应头
-        const contentType = response.headers.get('content-type') || 'application/octet-stream';
-        res.setHeader('Content-Type', contentType);
-
-        const contentLength = response.headers.get('content-length');
-        if (contentLength) {
-            res.setHeader('Content-Length', contentLength);
+        if (response.contentLength) {
+            res.setHeader('Content-Length', response.contentLength);
         }
 
-        // 根据响应类型设置额外头
-        if (contentType.includes('audio') || contentType.includes('octet-stream')) {
+        if (response.contentType.includes('audio') || response.contentType.includes('octet-stream')) {
             res.setHeader('Accept-Ranges', 'bytes');
         }
 
-        // 流式传输响应体
-        const reader = response.body?.getReader();
-        if (reader) {
-            const pump = async (): Promise<void> => {
-                const { done, value } = await reader.read();
-                if (done) {
-                    res.end();
-                    return;
-                }
-                res.write(Buffer.from(value));
-                return pump();
-            };
-            await pump();
-        } else {
-            const buffer = await response.arrayBuffer();
-            res.end(Buffer.from(buffer));
-        }
+        res.end(response.body);
     } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
+        if (error instanceof Error && error.message === 'Request timeout') {
             console.error('[dev-proxy] Request timeout:', decodedUrl.substring(0, 100));
             res.statusCode = 504;
             res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
             res.end(JSON.stringify({ error: 'Request timeout' }));
         } else {
             console.error('[dev-proxy] Request failed:', error);
             res.statusCode = 500;
             res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
             res.end(JSON.stringify({ error: 'Failed to proxy request' }));
         }
     }
